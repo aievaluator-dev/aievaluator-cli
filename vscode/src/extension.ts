@@ -27,14 +27,8 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // Prompt for expected output
-      const expected = await vscode.window.showInputBox({
-        prompt: 'Expected output (optional)',
-        placeHolder: 'The expected response from your agent',
-      });
-
-      // Pick metrics
-      const metricItems = [
+      // Single-screen: expected output + metrics in one QuickPick
+      const metricItems: vscode.QuickPickItem[] = [
         { label: 'g_eval', description: 'General LLM-as-a-Judge evaluation', picked: true },
         { label: 'faithfulness', description: 'Factual accuracy vs context (RAG)', picked: false },
         { label: 'hallucination', description: 'Detects fabricated information', picked: false },
@@ -42,15 +36,40 @@ export function activate(context: vscode.ExtensionContext) {
         { label: 'answer_relevancy', description: 'How well the answer addresses the query', picked: false },
       ];
 
-      const picked = await vscode.window.showQuickPick(metricItems, {
-        canPickMany: true,
-        placeHolder: 'Select metrics (g_eval is default)',
-        title: 'AI Evaluator — Choose Metrics',
+      const quickPick = vscode.window.createQuickPick();
+      quickPick.title = `Evaluate: "${selection.substring(0, 60)}${selection.length > 60 ? '...' : ''}"`;
+      quickPick.placeholder = 'Expected output (optional) — then select metrics and press Enter';
+      quickPick.items = metricItems;
+      quickPick.canSelectMany = true;
+      quickPick.selectedItems = metricItems.filter((m) => m.picked);
+      quickPick.buttons = [
+        { iconPath: new vscode.ThemeIcon('play'), tooltip: 'Run Evaluation' },
+      ];
+
+      const result = await new Promise<{ expected: string; metrics: string[] } | undefined>((resolve) => {
+        quickPick.onDidAccept(() => {
+          const picked = quickPick.selectedItems as vscode.QuickPickItem[];
+          const metrics = picked.length > 0 ? picked.map((m) => m.label) : ['g_eval'];
+          resolve({ expected: quickPick.value, metrics });
+          quickPick.hide();
+        });
+        quickPick.onDidTriggerButton(() => {
+          const picked = quickPick.selectedItems as vscode.QuickPickItem[];
+          const metrics = picked.length > 0 ? picked.map((m) => m.label) : ['g_eval'];
+          resolve({ expected: quickPick.value, metrics });
+          quickPick.hide();
+        });
+        quickPick.onDidHide(() => {
+          resolve(undefined);
+          quickPick.dispose();
+        });
+        quickPick.show();
       });
 
-      const metrics = (picked && picked.length > 0)
-        ? picked.map((m) => m.label)
-        : ['g_eval'];
+      if (!result) return; // user cancelled
+
+      const expected = result.expected;
+      const metrics = result.metrics;
 
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: 'Evaluating...' },
