@@ -33,6 +33,25 @@ export function activate(context: vscode.ExtensionContext) {
         placeHolder: 'The expected response from your agent',
       });
 
+      // Pick metrics
+      const metricItems = [
+        { label: 'g_eval', description: 'General LLM-as-a-Judge evaluation', picked: true },
+        { label: 'faithfulness', description: 'Factual accuracy vs context (RAG)', picked: false },
+        { label: 'hallucination', description: 'Detects fabricated information', picked: false },
+        { label: 'bias', description: 'Identifies biased outputs', picked: false },
+        { label: 'answer_relevancy', description: 'How well the answer addresses the query', picked: false },
+      ];
+
+      const picked = await vscode.window.showQuickPick(metricItems, {
+        canPickMany: true,
+        placeHolder: 'Select metrics (g_eval is default)',
+        title: 'AI Evaluator — Choose Metrics',
+      });
+
+      const metrics = (picked && picked.length > 0)
+        ? picked.map((m) => m.label)
+        : ['g_eval'];
+
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: 'Evaluating...' },
         async () => {
@@ -43,7 +62,7 @@ export function activate(context: vscode.ExtensionContext) {
               body: JSON.stringify({
                 rows: [{ input: selection, expected_output: expected || undefined }],
                 agent_endpoint: '/chat',
-                metrics: ['g_eval'],
+                metrics,
               }),
             });
 
@@ -55,10 +74,13 @@ export function activate(context: vscode.ExtensionContext) {
 
             const evalResult = data.results?.[0];
             if (evalResult) {
-              const firstScore = Object.values(evalResult.scores || {})[0] || 0;
-              const icon = evalResult.passed ? '✅' : '❌';
+              const scores = evalResult.scores || {};
+              const scoreList = Object.entries(scores)
+                .map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`)
+                .join(' · ');
+              const passIcon = evalResult.passed ? '✅' : '❌';
               vscode.window.showInformationMessage(
-                `AI Evaluator: ${(firstScore * 100).toFixed(0)}% ${icon}`,
+                `AI Evaluator: ${scoreList} ${passIcon}`,
               );
             }
           } catch (e) {
