@@ -1,0 +1,186 @@
+# =============================================================================
+# AI Evaluator CLI — Monorepo CI/CD
+# Build + test + publish all language clients from a single pipeline.
+# =============================================================================
+
+stages:
+  - detect
+  - build
+  - test
+  - publish
+
+# ── Detect changed folders ─────────────────────────────────────────────
+detect-changes:
+  stage: detect
+  image: alpine:latest
+  script:
+    - echo "Changed folders:"
+    - git diff --name-only HEAD~1 || echo "Initial commit"
+  artifacts:
+    paths:
+      - changed.txt
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - python/**/*
+        - node/**/*
+        - dotnet/**/*
+        - go/**/*
+        - vscode/**/*
+
+# ── Python ─────────────────────────────────────────────────────────────
+python:build:
+  stage: build
+  image: python:3.12
+  script:
+    - cd python
+    - pip install build
+    - python -m build
+  artifacts:
+    paths:
+      - python/dist/
+  rules:
+    - changes:
+        - python/**/*
+
+python:test:
+  stage: test
+  image: python:3.12
+  script:
+    - cd python
+    - pip install -e ".[dev]"
+    - pytest tests/ -v
+  rules:
+    - changes:
+        - python/**/*
+
+python:publish:
+  stage: publish
+  image: python:3.12
+  script:
+    - cd python
+    - pip install twine
+    - twine upload dist/*
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+      changes:
+        - python/**/*
+  needs: [python:test]
+
+# ── Node ───────────────────────────────────────────────────────────────
+node:build:
+  stage: build
+  image: node:20
+  script:
+    - cd node
+    - npm ci
+    - npm run build
+  artifacts:
+    paths:
+      - node/dist/
+  rules:
+    - changes:
+        - node/**/*
+
+node:test:
+  stage: test
+  image: node:20
+  script:
+    - cd node
+    - npm ci
+    - npm test
+  rules:
+    - changes:
+        - node/**/*
+
+node:publish:
+  stage: publish
+  image: node:20
+  script:
+    - cd node
+    - npm publish --access public
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+      changes:
+        - node/**/*
+  needs: [node:test]
+
+# ── Go ─────────────────────────────────────────────────────────────────
+go:build:
+  stage: build
+  image: golang:1.22
+  script:
+    - cd go
+    - go build ./cmd/aievaluator/
+  rules:
+    - changes:
+        - go/**/*
+
+go:test:
+  stage: test
+  image: golang:1.22
+  script:
+    - cd go
+    - go test ./... -v
+  rules:
+    - changes:
+        - go/**/*
+
+# ── .NET ───────────────────────────────────────────────────────────────
+dotnet:build:
+  stage: build
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - cd dotnet/src
+    - dotnet build
+  rules:
+    - changes:
+        - dotnet/**/*
+
+dotnet:test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - cd dotnet
+    - dotnet test
+  rules:
+    - changes:
+        - dotnet/**/*
+
+dotnet:publish:
+  stage: publish
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - cd dotnet/src
+    - dotnet pack -c Release
+    - dotnet nuget push bin/Release/*.nupkg -k $NUGET_API_KEY -s https://api.nuget.org/v3/index.json
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+      changes:
+        - dotnet/**/*
+  needs: [dotnet:test]
+
+# ── VS Code Extension ──────────────────────────────────────────────────
+vscode:build:
+  stage: build
+  image: node:20
+  script:
+    - cd vscode
+    - npm ci
+    - npm run compile
+  rules:
+    - changes:
+        - vscode/**/*
+
+vscode:publish:
+  stage: publish
+  image: node:20
+  script:
+    - cd vscode
+    - npm ci
+    - npx vsce publish
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+      changes:
+        - vscode/**/*
+  needs: [vscode:build]
