@@ -1,0 +1,31 @@
+// AI Quality Gate with Jenkins (using aievaluator CLI)
+pipeline {
+    agent any
+
+    environment {
+        AIEVALUATOR_API_KEY = credentials('ai-evaluator-api-key')
+    }
+
+    stages {
+        stage('AI Evaluation') {
+            steps {
+                sh '''
+                    pip install aievaluator
+                    aievaluator eval \
+                        --agent ${STAGING_AGENT_URL} \
+                        --dataset ./evals/regression.json \
+                        --min-score 0.80 \
+                        --ci \
+                        --format junit > report.xml
+                '''
+                junit 'report.xml'
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh './deploy.sh'
+            }
+        }
+    }
+}

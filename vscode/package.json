@@ -1,0 +1,50 @@
+{
+  "name": "aievaluator",
+  "displayName": "AI Evaluator",
+  "description": "Evaluate your AI agents directly from VS Code",
+  "version": "1.0.0",
+  "publisher": "aievaluator",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Testing", "AI"],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aievaluator.evaluateSelection",
+        "title": "AI Evaluator: Evaluate selection"
+      },
+      {
+        "command": "aievaluator.setAPIKey",
+        "title": "AI Evaluator: Set API Key"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aievaluator",
+          "title": "AI Evaluator",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "aievaluator": [
+        {
+          "id": "aievaluator.sidebar",
+          "name": "Evaluations"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.5"
+  }
+}

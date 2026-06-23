@@ -1,0 +1,22 @@
+# AI Quality Gate with GitLab CI (using aievaluator CLI)
+evaluate:
+  image: python:3.12
+  stage: verify
+  script:
+    - pip install aievaluator
+    - |
+      aievaluator eval \
+        --agent $STAGING_AGENT_URL \
+        --dataset ./evals/regression.json \
+        --metrics faithfulness,g_eval \
+        --min-score 0.80 \
+        --ci \
+        --format junit > report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+
+deploy:
+  stage: deploy
+  needs: ['evaluate']
+  script: ./deploy.sh
