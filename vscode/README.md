@@ -15,4 +15,4 @@ code --install-extension aievaluator.aievaluator
 - 📋 CI/CD snippet generator
 - 🔑 API key management
 
-> Full docs: [README raíz](../README.md)
+> Full docs: [README raíz](../README.md) · [Tutorial](./TUTORIAL.md)
