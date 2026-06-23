@@ -1,13 +1,11 @@
 using System.CommandLine;
 using System.Text.Json;
-
-// ═══════════════════════════════════════════════════════════════
-//  AI Evaluator CLI — .NET global tool
-// ═══════════════════════════════════════════════════════════════
+using AiEvaluator;
+using AiEvaluator.Formatters;
 
 var apiKeyOption = new Option<string?>("--api-key", "API key");
 var engineUrlOption = new Option<string?>("--engine-url", "Engine URL");
-var agentOption = new Option<string>("--agent", "Agent endpoint URL");
+var agentOption = new Option<string?>("--agent", "Agent endpoint URL");
 var datasetOption = new Option<string?>("--dataset", "JSON dataset file");
 var rowsOption = new Option<string?>("--rows", "Inline JSON array");
 var metricsOption = new Option<string?>("--metrics", "Metrics (comma-separated)");
@@ -23,76 +21,272 @@ var expectedOption = new Option<string?>("--expected", "Expected output");
 
 var rootCommand = new RootCommand("AI Evaluator CLI — evaluate your LLM agents from the command line");
 
-// login
+// ═══ login ═══
 var loginCmd = new Command("login", "Authenticate with AI Evaluator");
-loginCmd.AddOption(apiKeyOption);
-loginCmd.AddOption(engineUrlOption);
-loginCmd.SetHandler((apiKey, engineUrl) =>
+var loginApiKey = new Option<string?>("--api-key", "API key (non-interactive)");
+var loginEngineUrl = new Option<string?>("--engine-url", "Engine URL");
+loginCmd.AddOption(loginApiKey);
+loginCmd.AddOption(loginEngineUrl);
+loginCmd.SetHandler(async (apiKey, engineUrl) =>
 {
-    Console.WriteLine("login: coming soon — get your key at https://aievaluator.dev/settings");
-}, apiKeyOption, engineUrlOption);
+    var key = apiKey;
+    if (string.IsNullOrEmpty(key))
+    {
+        Console.Error.WriteLine();
+        Console.Error.WriteLine("Enter your AI Evaluator API key:");
+        Console.Error.WriteLine("(Get one at https://aievaluator.dev/settings)");
+        Console.Error.Write("API key: ");
+        key = Console.ReadLine()?.Trim();
+    }
+    if (string.IsNullOrEmpty(key)) { Console.Error.WriteLine("❌ API key cannot be empty."); Environment.Exit(2); }
+
+    var url = Config.ResolveEngineUrl(engineUrl);
+    var client = new ApiClient(url, key, 30);
+
+    try
+    {
+        var usage = await client.GetUsage();
+        var cfg = Config.Load();
+        cfg.ApiKey = key;
+        cfg.EngineUrl = url;
+        Config.Save(cfg);
+
+        var tenantName = usage.TryGetProperty("tenant_name", out var tn) ? tn.GetString() : "Unknown";
+        var tier = usage.TryGetProperty("tier", out var t) ? t.GetString() : "unknown";
+        var evalsUsed = usage.TryGetProperty("evaluations_this_cycle", out var eu) ? eu.GetDouble() : 0;
+        var evalsLimit = usage.TryGetProperty("evaluations_limit", out var el) ? el.GetDouble() : double.PositiveInfinity;
+
+        Console.WriteLine();
+        Console.WriteLine($"✅ Logged in as {tenantName} ({tier})");
+        Console.WriteLine($"   Evals: {evalsUsed}/{evalsLimit} this cycle");
+        Console.WriteLine("   Config saved to ~/.config/aievaluator/config.json");
+    }
+    catch (ApiError e) { Console.Error.WriteLine($"❌ {e.Message}"); Environment.Exit(2); }
+}, loginApiKey, loginEngineUrl);
 rootCommand.AddCommand(loginCmd);
 
-// whoami
+// ═══ whoami ═══
 var whoamiCmd = new Command("whoami", "Show current tenant info");
-whoamiCmd.SetHandler(() => Console.WriteLine("whoami: coming soon"));
+whoamiCmd.AddOption(apiKeyOption);
+whoamiCmd.SetHandler(async (apiKey) =>
+{
+    var key = Config.ResolveApiKey(apiKey);
+    if (string.IsNullOrEmpty(key)) { Console.Error.WriteLine("❌ Not logged in. Run: aievaluator login"); Environment.Exit(2); }
+
+    var url = Config.ResolveEngineUrl(null);
+    var client = new ApiClient(url, key, 30);
+
+    try
+    {
+        var usage = await client.GetUsage();
+        var tenantName = usage.TryGetProperty("tenant_name", out var tn) ? tn.GetString() : "Unknown";
+        var tier = usage.TryGetProperty("tier", out var t) ? t.GetString() : "unknown";
+        var evalsUsed = usage.TryGetProperty("evaluations_this_cycle", out var eu) ? eu.GetDouble() : 0;
+        var evalsLimit = usage.TryGetProperty("evaluations_limit", out var el) ? el.GetDouble() : double.PositiveInfinity;
+        var tin = usage.TryGetProperty("input_tokens_this_cycle", out var ti) ? ti.GetDouble() : 0;
+        var tout = usage.TryGetProperty("output_tokens_this_cycle", out var to) ? to.GetDouble() : 0;
+
+        Console.WriteLine();
+        Console.WriteLine($"Tenant:  {tenantName}");
+        Console.WriteLine($"Tier:    {tier}");
+        Console.WriteLine($"Evals:   {evalsUsed}/{evalsLimit} this cycle");
+        Console.WriteLine($"Tokens:  ↓{tin} · ↑{tout} this cycle");
+    }
+    catch (ApiError e) { Console.Error.WriteLine($"❌ {e.Message}"); Environment.Exit(2); }
+}, apiKeyOption);
 rootCommand.AddCommand(whoamiCmd);
 
-// quick
+// ═══ quick ═══
 var quickCmd = new Command("quick", "Quick eval via playground (no API key)");
 var quickQueryArg = new Argument<string?>("query", () => null, "Query to evaluate");
 quickCmd.AddArgument(quickQueryArg);
-quickCmd.AddOption(datasetOption);
-quickCmd.AddOption(agentOption);
-quickCmd.AddOption(expectedOption);
-quickCmd.AddOption(metricsOption);
-quickCmd.AddOption(judgeOption);
-quickCmd.AddOption(engineUrlOption);
-quickCmd.SetHandler((query, dataset, agent, expected, metrics, judge, engineUrl) =>
+var quickDataset = new Option<string?>("--dataset", "JSON dataset file");
+var quickAgent = new Option<string?>("--agent", () => "/chat", "Agent endpoint URL");
+var quickExpected = new Option<string?>("--expected", "Expected output");
+var quickMetrics = new Option<string?>("--metrics", "Metrics (comma-separated)");
+var quickJudge = new Option<string?>("--judge", "LLM judge model");
+var quickEngineUrl = new Option<string?>("--engine-url", "Engine URL");
+quickCmd.AddOption(quickDataset);
+quickCmd.AddOption(quickAgent);
+quickCmd.AddOption(quickExpected);
+quickCmd.AddOption(quickMetrics);
+quickCmd.AddOption(quickJudge);
+quickCmd.AddOption(quickEngineUrl);
+quickCmd.SetHandler(async (query, dataset, agent, expected, metricsStr, judge, engineUrl) =>
 {
-    Console.WriteLine("quick: coming soon");
-}, quickQueryArg, datasetOption, agentOption, expectedOption, metricsOption, judgeOption, engineUrlOption);
+    if (string.IsNullOrEmpty(query) && string.IsNullOrEmpty(dataset)) { Console.Error.WriteLine("❌ Provide a query or --dataset"); Environment.Exit(2); }
+
+    var url = Config.ResolveEngineUrl(engineUrl);
+    var client = new ApiClient(url, null, 30);
+
+    var status = await client.PlaygroundStatus();
+    var remaining = status.TryGetValue("remaining", out var rem) ? rem.GetDouble() : 5;
+    var limit = status.TryGetValue("limit", out var lim) ? lim.GetDouble() : 5;
+    var resets = status.TryGetValue("resets_at", out var rst) ? rst.GetString() : "midnight UTC";
+    Console.Error.WriteLine($"⚠️  Playground mode — {remaining}/{limit} remaining (resets at {resets})\n");
+
+    if (remaining <= 0) { Console.Error.WriteLine("❌ Playground limit reached. Run `aievaluator login` for 100 free evals/month."); Environment.Exit(2); }
+
+    object[] rows;
+    if (!string.IsNullOrEmpty(query))
+    {
+        var row = new Dictionary<string, object?> { ["input"] = query };
+        if (!string.IsNullOrEmpty(expected)) row["expected_output"] = expected;
+        rows = new object[] { row };
+    }
+    else
+    {
+        var json = File.ReadAllText(dataset!);
+        var parsed = JsonSerializer.Deserialize<JsonElement[]>(json) ?? Array.Empty<JsonElement>();
+        rows = parsed.Cast<object>().ToArray();
+    }
+
+    var agentUrl = string.IsNullOrEmpty(agent) ? "/chat" : agent;
+    var metricsList = string.IsNullOrEmpty(metricsStr) ? null : metricsStr.Split(',').Select(m => m.Trim()).ToArray();
+
+    try
+    {
+        var result = await client.PlaygroundEvaluate(null, rows, agentUrl, metricsList, judge);
+        OutputFormatter.FormatTable(result, 0.0, url);
+    }
+    catch (ApiError e) { Console.Error.WriteLine($"❌ {e.Message}"); Environment.Exit(2); }
+}, quickQueryArg, quickDataset, quickAgent, quickExpected, quickMetrics, quickJudge, quickEngineUrl);
 rootCommand.AddCommand(quickCmd);
 
-// eval
+// ═══ eval ═══
 var evalCmd = new Command("eval", "Full evaluation against an agent");
-evalCmd.AddOption(agentOption);
-evalCmd.AddOption(datasetOption);
-evalCmd.AddOption(rowsOption);
-evalCmd.AddOption(metricsOption);
-evalCmd.AddOption(agentFormatOption);
-evalCmd.AddOption(minScoreOption);
-evalCmd.AddOption(formatOption);
-evalCmd.AddOption(ciOption);
-evalCmd.AddOption(timeoutOption);
-evalCmd.AddOption(judgeModelOption);
-evalCmd.AddOption(nameOption);
-evalCmd.AddOption(apiKeyOption);
-evalCmd.AddOption(engineUrlOption);
-evalCmd.SetHandler((agent, dataset, rows, metrics, agentFormat, minScore, format, ci, timeout, judgeModel, name, apiKey, engineUrl) =>
+var evalAgent = new Option<string?>("--agent", "Agent endpoint URL");
+var evalDataset = new Option<string?>("--dataset", "JSON dataset file");
+var evalRows = new Option<string?>("--rows", "Inline JSON array");
+var evalMetrics = new Option<string?>("--metrics", "Metrics (comma-separated)");
+var evalAgentFormat = new Option<string?>("--agent-format", () => "openai", "Agent API format");
+var evalMinScore = new Option<string?>("--min-score", "Minimum score threshold (0-1)");
+var evalFormat = new Option<string?>("--format", () => "table", "Output format: table, json, junit");
+var evalCi = new Option<bool>("--ci", "CI mode");
+var evalTimeout = new Option<string?>("--timeout", () => "300", "Timeout in seconds");
+var evalJudgeModel = new Option<string?>("--judge-model", "LLM judge model");
+var evalName = new Option<string?>("--name", "Human-readable name for this evaluation");
+var evalApiKey = new Option<string?>("--api-key", "API key (overrides config)");
+var evalEngineUrl = new Option<string?>("--engine-url", "Engine URL");
+evalCmd.AddOption(evalAgent);
+evalCmd.AddOption(evalDataset);
+evalCmd.AddOption(evalRows);
+evalCmd.AddOption(evalMetrics);
+evalCmd.AddOption(evalAgentFormat);
+evalCmd.AddOption(evalMinScore);
+evalCmd.AddOption(evalFormat);
+evalCmd.AddOption(evalCi);
+evalCmd.AddOption(evalTimeout);
+evalCmd.AddOption(evalJudgeModel);
+evalCmd.AddOption(evalName);
+evalCmd.AddOption(evalApiKey);
+evalCmd.AddOption(evalEngineUrl);
+evalCmd.SetHandler(async (agent, dataset, rowsStr, metricsStr, agentFormat, minScoreStr, format, ci, timeoutStr, judgeModel, name, apiKey, engineUrl) =>
 {
-    Console.WriteLine("eval: coming soon");
-}, agentOption, datasetOption, rowsOption, metricsOption, agentFormatOption,
-   minScoreOption, formatOption, ciOption, timeoutOption, judgeModelOption,
-   nameOption, apiKeyOption, engineUrlOption);
+    if (string.IsNullOrEmpty(agent)) { Console.Error.WriteLine("❌ --agent is required"); Environment.Exit(2); }
+    if (string.IsNullOrEmpty(dataset) && string.IsNullOrEmpty(rowsStr)) { Console.Error.WriteLine("❌ Provide --dataset or --rows"); Environment.Exit(2); }
+
+    var key = Config.ResolveApiKey(apiKey);
+    if (string.IsNullOrEmpty(key)) { Console.Error.WriteLine("❌ API key required. Run: aievaluator login"); Environment.Exit(2); }
+
+    var timeout = int.TryParse(timeoutStr, out var t) ? t : 300;
+    var url = Config.ResolveEngineUrl(engineUrl);
+    var client = new ApiClient(url, key, timeout);
+
+    var metricsList = string.IsNullOrEmpty(metricsStr) ? Config.ResolveDefaultMetrics().Split(',') : metricsStr.Split(',').Select(m => m.Trim()).ToArray();
+    var minScore = string.IsNullOrEmpty(minScoreStr) ? Config.ResolveDefaultMinScore() : double.Parse(minScoreStr);
+
+    JsonElement result;
+    try
+    {
+        if (!string.IsNullOrEmpty(dataset))
+        {
+            result = await client.EvaluateUpload(dataset, agent, agentFormat, string.Join(",", metricsList));
+        }
+        else
+        {
+            var rows = JsonSerializer.Deserialize<object[]>(rowsStr!) ?? Array.Empty<object>();
+            result = await client.EvaluateSync(rows, agent, agentFormat, metricsList, judgeModel, name);
+        }
+    }
+    catch (ApiError e)
+    {
+        Console.Error.WriteLine($"❌ {e.Message}");
+        if (e.Detail != null) Console.Error.WriteLine(JsonSerializer.Serialize(e.Detail));
+        Environment.Exit(e.StatusCode == 0 ? 3 : 2);
+        return;
+    }
+
+    switch (format)
+    {
+        case "json": Console.WriteLine(OutputFormatter.FormatJson(result, minScore)); break;
+        case "junit": Console.WriteLine(OutputFormatter.FormatJUnit(result, minScore)); break;
+        default: OutputFormatter.FormatTable(result, minScore, url); break;
+    }
+
+    var score = result.TryGetProperty("overall_score", out var os) ? os.GetDouble() : 0;
+    if (score < minScore) Environment.Exit(1);
+}, evalAgent, evalDataset, evalRows, evalMetrics, evalAgentFormat, evalMinScore,
+   evalFormat, evalCi, evalTimeout, evalJudgeModel, evalName, evalApiKey, evalEngineUrl);
 rootCommand.AddCommand(evalCmd);
 
-// config
+// ═══ config ═══
 var configCmd = new Command("config", "Manage CLI configuration");
+
 var configShowCmd = new Command("show", "Show current configuration");
-configShowCmd.SetHandler(() => Console.WriteLine("{}"));
+configShowCmd.SetHandler(() =>
+{
+    var g = Config.Load(true);
+    var l = Config.Load(false);
+    var merged = new Dictionary<string, object?>();
+    if (!string.IsNullOrEmpty(g.ApiKey) || !string.IsNullOrEmpty(l.ApiKey)) merged["api_key"] = l.ApiKey ?? g.ApiKey;
+    merged["engine_url"] = Config.ResolveEngineUrl(null);
+    if (!string.IsNullOrEmpty(l.DefaultMetrics) || !string.IsNullOrEmpty(g.DefaultMetrics)) merged["default_metrics"] = l.DefaultMetrics ?? g.DefaultMetrics;
+    if (l.DefaultMinScore > 0 || g.DefaultMinScore > 0) merged["default_min_score"] = l.DefaultMinScore > 0 ? l.DefaultMinScore : g.DefaultMinScore;
+    Console.WriteLine(JsonSerializer.Serialize(merged, new JsonSerializerOptions { WriteIndented = true }));
+});
 configCmd.AddCommand(configShowCmd);
+
 var configSetCmd = new Command("set", "Set a configuration value");
 var setKeyArg = new Argument<string>("key");
 var setValueArg = new Argument<string>("value");
 configSetCmd.AddArgument(setKeyArg);
 configSetCmd.AddArgument(setValueArg);
-configSetCmd.SetHandler((key, value) => Console.WriteLine($"✅ {key} = {value}"), setKeyArg, setValueArg);
+configSetCmd.SetHandler((key, value) =>
+{
+    var valid = new[] { "engine-url", "default-metrics", "default-min-score" };
+    if (!valid.Contains(key)) { Console.Error.WriteLine($"❌ Invalid key: {key}"); Environment.Exit(2); }
+    var cfgKey = key switch { "engine-url" => "EngineUrl", "default-metrics" => "DefaultMetrics", "default-min-score" => "DefaultMinScore", _ => key };
+    var cfg = Config.Load();
+    var prop = typeof(Config).GetProperty(cfgKey);
+    if (prop != null)
+    {
+        if (prop.PropertyType == typeof(double))
+            prop.SetValue(cfg, double.Parse(value));
+        else
+            prop.SetValue(cfg, value);
+    }
+    Config.Save(cfg);
+    Console.WriteLine($"✅ {key} = {value}");
+}, setKeyArg, setValueArg);
 configCmd.AddCommand(configSetCmd);
+
 var configUnsetCmd = new Command("unset", "Remove a configuration value");
 var unsetKeyArg = new Argument<string>("key");
 configUnsetCmd.AddArgument(unsetKeyArg);
-configUnsetCmd.SetHandler((key) => Console.WriteLine($"✅ {key} removed"), unsetKeyArg);
+configUnsetCmd.SetHandler((key) =>
+{
+    var cfgKey = key switch { "engine-url" => "EngineUrl", "default-metrics" => "DefaultMetrics", "default-min-score" => "DefaultMinScore", _ => key };
+    var cfg = Config.Load();
+    var prop = typeof(Config).GetProperty(cfgKey);
+    if (prop != null)
+    {
+        if (prop.PropertyType == typeof(double)) prop.SetValue(cfg, 0.0);
+        else prop.SetValue(cfg, null);
+    }
+    Config.Save(cfg);
+    Console.WriteLine($"✅ {key} removed");
+}, unsetKeyArg);
 configCmd.AddCommand(configUnsetCmd);
 rootCommand.AddCommand(configCmd);
 

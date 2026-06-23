@@ -39,12 +39,13 @@ The extension works **without an API key** in playground mode — 5 free evals/d
    What is the capital of France?
    ```
 
-3. **Right-click** → **"AI Evaluator: Evaluate selection"**
-4. Optional: enter an expected output (`Paris`)
-5. VS Code shows the result:
+3. **Right-click** → **"AI Evaluator: Evaluate from editor"**
+4. Pick your agent (internal or custom URL)
+5. Type an expected output (optional) + select metrics → Enter
+6. VS Code shows the result:
 
    ```
-   AI Evaluator: 92% ✅
+   AI Evaluator: g_eval: 92% ✅
    ```
 
 > 💡 **Tip:** You can also use `Ctrl+Shift+P` → type `Evaluate selection`.

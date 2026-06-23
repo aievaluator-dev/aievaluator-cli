@@ -1,18 +1,16 @@
 {
   "name": "aievaluator",
   "displayName": "AI Evaluator",
-  "description": "Evaluate your AI agents directly from VS Code",
+  "description": "Evaluate your AI agents directly from VS Code — no signup required",
   "version": "1.0.0",
   "publisher": "aievaluator",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": [
-    "Testing",
-    "AI"
-  ],
+  "categories": ["Testing", "AI"],
   "activationEvents": [
     "onCommand:aievaluator.evaluateSelection",
+    "onCommand:aievaluator.evaluateFile",
     "onCommand:aievaluator.setAPIKey",
     "onCommand:aievaluator.generateCISnippet",
     "onView:aievaluator.sidebar"
@@ -21,8 +19,16 @@
   "contributes": {
     "commands": [
       {
+        "command": "aievaluator.evaluateFromEditor",
+        "title": "AI Evaluator: Evaluate from editor"
+      },
+      {
         "command": "aievaluator.evaluateSelection",
         "title": "AI Evaluator: Evaluate selection"
+      },
+      {
+        "command": "aievaluator.evaluateFile",
+        "title": "AI Evaluator: Evaluate this dataset"
       },
       {
         "command": "aievaluator.setAPIKey",
@@ -33,6 +39,36 @@
         "title": "AI Evaluator: Generate CI/CD Snippet"
       }
     ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "aievaluator.evaluateFromEditor",
+          "group": "aievaluator",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aievaluator.evaluateFile",
+          "group": "aievaluator",
+          "when": "resourceExtname == .json"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "aievaluator.evaluateSelection",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aievaluator.evaluateFile",
+          "when": "resourceExtname == .json"
+        },
+        {
+          "command": "aievaluator.setAPIKey"
+        },
+        {
+          "command": "aievaluator.generateCISnippet"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -50,23 +86,25 @@
         }
       ]
     },
-    "menus": {
-      "editor/context": [
-        {
-          "command": "aievaluator.evaluateSelection",
-          "group": "aievaluator",
-          "when": "editorHasSelection"
-        }
-      ],
-      "commandPalette": [
-        {
-          "command": "aievaluator.evaluateSelection",
-          "when": "editorHasSelection"
+    "configuration": {
+      "title": "AI Evaluator",
+      "properties": {
+        "aievaluator.defaultAgent": {
+          "type": "string",
+          "default": "",
+          "description": "Default agent endpoint URL for evaluations"
         },
-        {
-          "command": "aievaluator.setAPIKey"
+        "aievaluator.defaultMetrics": {
+          "type": "string",
+          "default": "g_eval",
+          "description": "Default metrics (comma-separated). Available: g_eval, faithfulness, hallucination, bias, answer_relevancy"
+        },
+        "aievaluator.engineUrl": {
+          "type": "string",
+          "default": "https://api.aievaluator.dev",
+          "description": "AI Evaluator Engine API URL"
         }
-      ]
+      }
     }
   },
   "scripts": {
