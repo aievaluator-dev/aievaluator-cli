@@ -11,7 +11,12 @@
     "Testing",
     "AI"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:aievaluator.evaluateSelection",
+    "onCommand:aievaluator.setAPIKey",
+    "onCommand:aievaluator.generateCISnippet",
+    "onView:aievaluator.sidebar"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -22,6 +27,10 @@
       {
         "command": "aievaluator.setAPIKey",
         "title": "AI Evaluator: Set API Key"
+      },
+      {
+        "command": "aievaluator.generateCISnippet",
+        "title": "AI Evaluator: Generate CI/CD Snippet"
       }
     ],
     "viewsContainers": {
@@ -38,6 +47,24 @@
         {
           "id": "aievaluator.sidebar",
           "name": "Evaluations"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "aievaluator.evaluateSelection",
+          "group": "aievaluator",
+          "when": "editorHasSelection"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "aievaluator.evaluateSelection",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aievaluator.setAPIKey"
         }
       ]
     }
