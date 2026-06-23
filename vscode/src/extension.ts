@@ -1,58 +1,196 @@
-// AI Evaluator VS Code Extension
 import * as vscode from 'vscode';
+import * as path from 'path';
+
+const ENGINE_URL = 'https://api.aievaluator.dev';
 
 export function activate(context: vscode.ExtensionContext) {
   console.log('AI Evaluator extension activated');
 
-  // Command: evaluate selection
+  // Register sidebar
+  const provider = new SidebarProvider(context.extensionUri, context);
   context.subscriptions.push(
-    vscode.commands.registerCommand('aievaluator.evaluateSelection', () => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor) return;
+    vscode.window.registerWebviewViewProvider('aievaluator.sidebar', provider)
+  );
 
-      const selection = editor.document.getText(editor.selection);
-      if (!selection) {
-        vscode.window.showWarningMessage('No text selected');
+  // Quick eval from selection
+  context.subscriptions.push(
+    vscode.commands.registerCommand('aievaluator.evaluateSelection', async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showWarningMessage('AI Evaluator: No active editor');
         return;
       }
 
-      vscode.window.showInformationMessage(`AI Evaluator: coming soon. Selected ${selection.length} chars.`);
+      const selection = editor.document.getText(editor.selection);
+      if (!selection) {
+        vscode.window.showWarningMessage('AI Evaluator: Select text to evaluate');
+        return;
+      }
+
+      // Prompt for expected output
+      const expected = await vscode.window.showInputBox({
+        prompt: 'Expected output (optional)',
+        placeHolder: 'The expected response from your agent',
+      });
+
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Evaluating...' },
+        async () => {
+          try {
+            const resp = await fetch(`${ENGINE_URL}/api/v1/playground/evaluate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                rows: [{ input: selection, expected_output: expected || undefined }],
+                agent_endpoint: '/chat',
+                metrics: ['faithfulness', 'g_eval'],
+              }),
+            });
+
+            if (!resp.ok) {
+              const detail = await resp.json().catch(() => ({}));
+              const err = detail as { error?: string };
+              vscode.window.showErrorMessage(`AI Evaluator: ${err.error || `HTTP ${resp.status}`}`);
+              return;
+            }
+
+            const data = await resp.json() as {
+              results: Array<{ query: string; scores: Record<string, number>; passed: boolean }>;
+              overall_score: number;
+              playground: boolean;
+            };
+
+            const result = data.results?.[0];
+            if (result) {
+              const firstScore = Object.values(result.scores || {})[0] || 0;
+              const icon = result.passed ? '✅' : '❌';
+              vscode.window.showInformationMessage(
+                `AI Evaluator: ${(firstScore * 100).toFixed(0)}% ${icon}`,
+              );
+            }
+          } catch (e) {
+            vscode.window.showErrorMessage(`AI Evaluator: ${e instanceof Error ? e.message : 'Unknown error'}`);
+          }
+        }
+      );
     })
   );
 
-  // Command: set API key
+  // Set API key
   context.subscriptions.push(
     vscode.commands.registerCommand('aievaluator.setAPIKey', async () => {
       const key = await vscode.window.showInputBox({
         prompt: 'Enter your AI Evaluator API key',
         placeHolder: 'sk-...',
         password: true,
+        ignoreFocusOut: true,
       });
       if (key) {
         await context.secrets.store('aievaluator.apiKey', key);
-        vscode.window.showInformationMessage('API key saved');
+        vscode.window.showInformationMessage('AI Evaluator: API key saved');
       }
     })
   );
 
-  // Sidebar provider (placeholder)
-  const provider = new SidebarProvider();
+  // Generate CI/CD snippet
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('aievaluator.sidebar', provider)
+    vscode.commands.registerCommand('aievaluator.generateCISnippet', async () => {
+      const dataset = await vscode.window.showInputBox({
+        prompt: 'Path to your dataset file',
+        placeHolder: './evals/regression.json',
+        value: './evals/regression.json',
+      });
+
+      if (!dataset) return;
+
+      const snippet = `# GitHub Actions — AI Quality Gate
+name: AI Quality Gate
+on: [pull_request]
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install aievaluator
+      - run: |
+          aievaluator eval \\
+            --agent \${{ vars.STAGING_AGENT_URL }} \\
+            --dataset ${dataset} \\
+            --metrics faithfulness,g_eval \\
+            --min-score 0.80 \\
+            --ci \\
+            --format junit > report.xml
+        env:
+          AIEVALUATOR_API_KEY: \${{ secrets.AI_EVALUATOR_API_KEY }}
+      - name: Deploy
+        if: success()
+        run: ./deploy.sh`;
+
+      const doc = await vscode.workspace.openTextDocument({
+        content: snippet,
+        language: 'yaml',
+      });
+      await vscode.window.showTextDocument(doc);
+    })
   );
 }
 
 class SidebarProvider implements vscode.WebviewViewProvider {
+  private _view?: vscode.WebviewView;
+
+  constructor(
+    private readonly _extensionUri: vscode.Uri,
+    private readonly _context: vscode.ExtensionContext,
+  ) {}
+
   resolveWebviewView(webviewView: vscode.WebviewView) {
+    this._view = webviewView;
     webviewView.webview.options = { enableScripts: true };
-    webviewView.webview.html = `
-      <html>
-        <body>
-          <h3>AI Evaluator 🧪</h3>
-          <p>Coming soon. Evaluate your agents from VS Code.</p>
-        </body>
-      </html>
-    `;
+
+    webviewView.webview.onDidReceiveMessage(async (msg) => {
+      switch (msg.command) {
+        case 'evaluate':
+          await vscode.commands.executeCommand('aievaluator.evaluateSelection');
+          break;
+        case 'openDashboard':
+          vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev'));
+          break;
+      }
+    });
+
+    webviewView.webview.html = this._getHtml();
+  }
+
+  private _getHtml(): string {
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body { padding: 12px; font-family: var(--vscode-font-family); color: var(--vscode-foreground); }
+    button { width: 100%; padding: 8px; margin: 6px 0; background: var(--vscode-button-background);
+             color: var(--vscode-button-foreground); border: none; cursor: pointer; border-radius: 3px; }
+    button:hover { background: var(--vscode-button-hoverBackground); }
+    h3 { margin-top: 0; }
+    .hint { font-size: 11px; color: var(--vscode-descriptionForeground); margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h3>🧪 AI Evaluator</h3>
+  <p>Evaluate your prompts and agents from VS Code.</p>
+  <button onclick="runEval()">Run Quick Evaluation</button>
+  <button onclick="openDashboard()">Open Dashboard</button>
+  <p class="hint">Select text in the editor, then run a quick evaluation.</p>
+  <script>
+    const vscode = acquireVsCodeApi();
+    function runEval() { vscode.postMessage({ command: 'evaluate' }); }
+    function openDashboard() { vscode.postMessage({ command: 'openDashboard' }); }
+  </script>
+</body>
+</html>`;
   }
 }
 
