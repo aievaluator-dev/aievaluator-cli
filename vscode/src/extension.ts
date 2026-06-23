@@ -43,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
               body: JSON.stringify({
                 rows: [{ input: selection, expected_output: expected || undefined }],
                 agent_endpoint: '/chat',
-                metrics: ['faithfulness', 'g_eval'],
+                metrics: ['g_eval'],
               }),
             });
 

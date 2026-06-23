@@ -68,7 +68,7 @@ function activate(context) {
                     body: JSON.stringify({
                         rows: [{ input: selection, expected_output: expected || undefined }],
                         agent_endpoint: '/chat',
-                        metrics: ['faithfulness', 'g_eval'],
+                        metrics: ['g_eval'],
                     }),
                 });
                 const data = JSON.parse(result);
