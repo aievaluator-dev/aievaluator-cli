@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
+import * as https from 'https';
 
 const ENGINE_URL = 'https://api.aievaluator.dev';
 
@@ -37,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
         { location: vscode.ProgressLocation.Notification, title: 'Evaluating...' },
         async () => {
           try {
-            const resp = await fetch(`${ENGINE_URL}/api/v1/playground/evaluate`, {
+            const result = await httpRequest(`${ENGINE_URL}/api/v1/playground/evaluate`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -47,29 +47,27 @@ export function activate(context: vscode.ExtensionContext) {
               }),
             });
 
-            if (!resp.ok) {
-              const detail = await resp.json().catch(() => ({}));
-              const err = detail as { error?: string };
-              vscode.window.showErrorMessage(`AI Evaluator: ${err.error || `HTTP ${resp.status}`}`);
-              return;
-            }
-
-            const data = await resp.json() as {
+            const data = JSON.parse(result) as {
               results: Array<{ query: string; scores: Record<string, number>; passed: boolean }>;
               overall_score: number;
               playground: boolean;
             };
 
-            const result = data.results?.[0];
-            if (result) {
-              const firstScore = Object.values(result.scores || {})[0] || 0;
-              const icon = result.passed ? '✅' : '❌';
+            const evalResult = data.results?.[0];
+            if (evalResult) {
+              const firstScore = Object.values(evalResult.scores || {})[0] || 0;
+              const icon = evalResult.passed ? '✅' : '❌';
               vscode.window.showInformationMessage(
                 `AI Evaluator: ${(firstScore * 100).toFixed(0)}% ${icon}`,
               );
             }
           } catch (e) {
-            vscode.window.showErrorMessage(`AI Evaluator: ${e instanceof Error ? e.message : 'Unknown error'}`);
+            const msg = e instanceof Error ? e.message : 'Unknown error';
+            if (msg.includes('429')) {
+              vscode.window.showWarningMessage('AI Evaluator: Daily limit reached. Sign up for 100 free evals/month.');
+            } else {
+              vscode.window.showErrorMessage(`AI Evaluator: ${msg}`);
+            }
           }
         }
       );
@@ -195,3 +193,38 @@ class SidebarProvider implements vscode.WebviewViewProvider {
 }
 
 export function deactivate() {}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+function httpRequest(url: string, options: { method: string; headers: Record<string, string>; body?: string }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const req = https.request(
+      {
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: parsed.pathname + parsed.search,
+        method: options.method,
+        headers: {
+          ...options.headers,
+          'Content-Length': Buffer.byteLength(options.body || ''),
+        },
+        rejectUnauthorized: false, // allow self-signed certs in dev
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(`HTTP ${res.statusCode}: ${data.substring(0, 200)}`));
+          } else {
+            resolve(data);
+          }
+        });
+      },
+    );
+    req.on('error', (e) => reject(e));
+    if (options.body) req.write(options.body);
+    req.end();
+  });
+}
