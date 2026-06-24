@@ -210,8 +210,6 @@ cd aievaluator-cli
 
 **Franco Vinciarelli** — [@fvinciarelli](https://github.com/fvinciarelli)
 
-Built with ❤️ by a solo dev. Building tools to make AI agents testable and reliable.
-
 ## 📄 License
 
 MIT © [AI Evaluator](https://aievaluator.dev)
