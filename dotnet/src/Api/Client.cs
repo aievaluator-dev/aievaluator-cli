@@ -63,17 +63,19 @@ public class ApiClient
     }
 
     public async Task<JsonElement> EvaluateSync(object[] rows, string agentUrl, string agentFormat = "openai",
-        string[]? metrics = null, string? judgeModel = null, string? name = null)
+        string[]? metrics = null, string? judgeModel = null, string? name = null,
+        Dictionary<string, double>? thresholds = null, List<object>? customEvaluators = null)
     {
         var body = new Dictionary<string, object?>
         {
             ["rows"] = rows,
             ["agent"] = new { url = agentUrl, format = agentFormat },
             ["metrics"] = metrics ?? new[] { "faithfulness", "g_eval" },
-            ["custom_evaluators"] = Array.Empty<object>(),
+            ["custom_evaluators"] = customEvaluators ?? new List<object>(),
         };
         if (!string.IsNullOrEmpty(name)) body["name"] = name;
         if (!string.IsNullOrEmpty(judgeModel)) body["judge_model"] = judgeModel;
+        if (thresholds != null && thresholds.Count > 0) body["thresholds"] = thresholds;
         return await Request("POST", "/api/v1/evaluations/sync", body);
     }
 
@@ -100,7 +102,7 @@ public class ApiClient
     }
 
     public async Task<JsonElement> PlaygroundEvaluate(string[]? queries = null, object[]? rows = null,
-        string? agentEndpoint = null, string[]? metrics = null, string? judge = null)
+        string? agentEndpoint = null, object[]? metrics = null, string? judge = null)
     {
         var body = new Dictionary<string, object?> { ["metrics"] = metrics ?? new[] { "g_eval" } };
         if (queries != null) body["queries"] = queries;

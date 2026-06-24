@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import * as fs from 'fs';
+import * as path from 'path';
 import * as readline from 'readline';
 
 import { APIClient, APIError } from './api/client';
@@ -24,6 +25,42 @@ import { formatJson } from './formatters/json';
 import { formatJunit } from './formatters/junit';
 
 const VERSION = '1.0.0';
+
+const SMOKE_TEST_DATASET = [
+  { input: 'What is 2+2?', expected_output: '4' },
+  { input: 'What is the capital of France?', expected_output: 'Paris' },
+  { input: 'Say hello in Spanish', expected_output: 'Hola' },
+];
+
+function parseQuickMetrics(
+  metricsStr?: string,
+  defaultThreshold?: number,
+): (string | Record<string, unknown>)[] | undefined {
+  if (!metricsStr) return undefined;
+  return metricsStr.split(',').map((item) => {
+    const trimmed = item.trim();
+    if (trimmed.includes(':')) {
+      const [name, val] = trimmed.split(':').map((s) => s.trim());
+      return { name, threshold: parseFloat(val) };
+    }
+    if (defaultThreshold !== undefined) {
+      return { name: trimmed, threshold: defaultThreshold };
+    }
+    return trimmed;
+  });
+}
+
+function parseDatasetFile(filePath: string): Record<string, unknown>[] {
+  const raw = fs.readFileSync(filePath, 'utf-8');
+  if (filePath.endsWith('.jsonl')) {
+    return raw
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line));
+  }
+  const data = JSON.parse(raw);
+  return Array.isArray(data) ? data : [data];
+}
 
 function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
@@ -128,7 +165,8 @@ async function main() {
     .option('--dataset <path>', 'JSON dataset file')
     .option('--agent <url>', 'Agent endpoint URL', '/chat')
     .option('--expected <text>', 'Expected output')
-    .option('--metrics <metrics>', 'Metrics (comma-separated)')
+    .option('--metrics <metrics>', 'Metrics: faithfulness,g_eval or faithfulness:0.90,g_eval:0.75')
+    .option('--min-score <score>', 'Apply threshold to all metrics and enforce exit code')
     .option('--judge <model>', 'LLM judge model')
     .option('--engine-url <url>', 'Engine URL')
     .action(async (query, options) => {
@@ -144,9 +182,10 @@ async function main() {
       const url = resolveEngineUrl(options.engineUrl);
       const client = new APIClient(url);
 
-      const metricsList = options.metrics
-        ? options.metrics.split(',').map((m: string) => m.trim())
-        : undefined;
+      const metricsList = parseQuickMetrics(
+        options.metrics as string | undefined,
+        options.minScore !== undefined ? parseFloat(options.minScore) : undefined,
+      );
 
       // Check playground status
       let status = { used: 0, limit: 5 as number, remaining: 5, resets_at: 'midnight UTC' };
@@ -167,9 +206,7 @@ async function main() {
         rows = [{ input: query }];
         if (options.expected) rows[0].expected_output = options.expected;
       } else {
-        const raw = fs.readFileSync(options.dataset, 'utf-8');
-        const data = JSON.parse(raw);
-        rows = Array.isArray(data) ? data : [data];
+        rows = parseDatasetFile(options.dataset);
       }
 
       try {
@@ -179,7 +216,11 @@ async function main() {
           metrics: metricsList,
           judge: options.judge,
         });
-        formatTable(result, 0.0, url);
+        const overallPassed = ((result.results as Array<Record<string, unknown>>) || []).every(
+          (r) => r.passed !== false,
+        );
+        formatTable(result, options.minScore ? parseFloat(options.minScore) : 0.0, url);
+        if (options.minScore !== undefined && !overallPassed) process.exit(1);
       } catch (e) {
         const err = e as APIError;
         console.error(`❌ ${err.message}`);
@@ -199,7 +240,9 @@ async function main() {
     .option('--rows <json>', 'Inline JSON array of test cases')
     .option('--metrics <metrics>', 'Metrics (comma-separated)')
     .option('--agent-format <format>', 'Agent API format', 'openai')
-    .option('--min-score <score>', 'Minimum score threshold (0-1)')
+    .option('--min-score <score>', 'Minimum overall score threshold (0-1)')
+    .option('--thresholds <thresholds>', 'Per-metric thresholds: faithfulness:0.90,g_eval:0.75')
+    .option('--custom <json>', 'Inline custom evaluator JSON')
     .option('--format <format>', 'Output format: table, json, junit', 'table')
     .option('--ci', 'CI mode (no colors, no prompts)')
     .option('--timeout <seconds>', 'Timeout in seconds', '300')
@@ -234,18 +277,30 @@ async function main() {
         ? parseFloat(options.minScore)
         : resolveDefaultMinScore();
 
+      // Parse per-metric thresholds
+      let thresholds: Record<string, number> | undefined;
+      if (options.thresholds) {
+        thresholds = {};
+        for (const pair of (options.thresholds as string).split(',')) {
+          const [metric, val] = pair.split(':').map((s) => s.trim());
+          if (metric && val) {
+            thresholds[metric] = parseFloat(val);
+          }
+        }
+      }
+
       let result: Record<string, unknown>;
 
       try {
+        let rows: Record<string, unknown>[];
         if (options.dataset) {
-          result = await client.evaluateUpload(
-            options.dataset,
-            options.agent,
-            options.agentFormat,
-            metricsList.join(','),
-          );
+          try {
+            rows = parseDatasetFile(options.dataset);
+          } catch (e) {
+            console.error(`❌ Cannot read dataset: ${e}`);
+            process.exit(2);
+          }
         } else {
-          let rows: Record<string, unknown>[];
           try {
             rows = JSON.parse(options.rows);
           } catch {
@@ -253,16 +308,30 @@ async function main() {
             process.exit(2);
           }
           if (!Array.isArray(rows)) rows = [rows];
-
-          result = await client.evaluateSync(
-            rows,
-            options.agent,
-            options.agentFormat,
-            metricsList,
-            options.judgeModel,
-            options.name,
-          );
         }
+
+        // Parse inline custom evaluators
+        let customEvaluators: Record<string, unknown>[] | undefined;
+        if (options.custom) {
+          try {
+            const parsed = JSON.parse(options.custom);
+            customEvaluators = Array.isArray(parsed) ? parsed : [parsed];
+          } catch {
+            console.error('❌ Invalid JSON in --custom');
+            process.exit(2);
+          }
+        }
+
+        result = await client.evaluateSync(
+          rows,
+          options.agent,
+          options.agentFormat,
+          metricsList,
+          options.judgeModel,
+          options.name,
+          thresholds,
+          customEvaluators,
+        );
       } catch (e) {
         const err = e as APIError;
         console.error(`❌ ${err.message}`);
@@ -355,6 +424,68 @@ async function main() {
       } else {
         console.log(`${key} was not set`);
       }
+    });
+
+  // ═════════════════════════════════════════════════════════════════
+  //  init
+  // ═════════════════════════════════════════════════════════════════
+  program
+    .command('init')
+    .description('Initialize a new AI Evaluator project in the current directory')
+    .action(() => {
+      const cwd = process.cwd();
+
+      // 1. Create aievaluator.config.json
+      const configPath = path.join(cwd, 'aievaluator.config.json');
+      if (fs.existsSync(configPath)) {
+        console.log('⏭️  aievaluator.config.json already exists, skipping');
+      } else {
+        fs.writeFileSync(
+          configPath,
+          JSON.stringify(
+            {
+              engine_url: 'https://api.aievaluator.dev',
+              default_metrics: 'faithfulness,g_eval',
+              default_min_score: 0.8,
+            },
+            null,
+            2,
+          ) + '\n',
+        );
+        console.log('✅ Created aievaluator.config.json');
+      }
+
+      // 2. Create evals/ directory + smoke-test.json
+      const evalsDir = path.join(cwd, 'evals');
+      if (!fs.existsSync(evalsDir)) fs.mkdirSync(evalsDir);
+      const smokePath = path.join(evalsDir, 'smoke-test.json');
+      if (fs.existsSync(smokePath)) {
+        console.log('⏭️  evals/smoke-test.json already exists, skipping');
+      } else {
+        fs.writeFileSync(smokePath, JSON.stringify(SMOKE_TEST_DATASET, null, 2) + '\n');
+        console.log('✅ Created evals/smoke-test.json (3 example queries)');
+      }
+
+      // 3. Update .gitignore
+      const gitignorePath = path.join(cwd, '.gitignore');
+      const entry = 'aievaluator.config.json';
+      let gitignoreLines: string[] = [];
+      if (fs.existsSync(gitignorePath)) {
+        gitignoreLines = fs.readFileSync(gitignorePath, 'utf-8').split('\n');
+      }
+      if (!gitignoreLines.includes(entry)) {
+        const content = gitignoreLines.length > 0 && gitignoreLines[gitignoreLines.length - 1].trim() !== ''
+          ? '\n' + entry + '\n'
+          : entry + '\n';
+        fs.appendFileSync(gitignorePath, content);
+        console.log(`✅ Added ${entry} to .gitignore`);
+      }
+
+      console.log();
+      console.log('Next steps:');
+      console.log('  aievaluator quick --dataset ./evals/smoke-test.json');
+      console.log('  aievaluator login    (for 100 free evals/month)');
+      console.log();
     });
 
   await program.parseAsync(process.argv);

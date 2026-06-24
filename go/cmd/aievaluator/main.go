@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gitlab.com/aievaluator/aievaluator-cli/go/internal/api"
@@ -12,6 +14,44 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+var smokeTestDataset = []map[string]interface{}{
+	{"input": "What is 2+2?", "expected_output": "4"},
+	{"input": "What is the capital of France?", "expected_output": "Paris"},
+	{"input": "Say hello in Spanish", "expected_output": "Hola"},
+}
+
+func parseDatasetFile(filePath string) ([]map[string]interface{}, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasSuffix(filePath, ".jsonl") {
+		var rows []map[string]interface{}
+		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			var row map[string]interface{}
+			if err := json.Unmarshal([]byte(line), &row); err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+		return rows, scanner.Err()
+	}
+	var rows []map[string]interface{}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		var row map[string]interface{}
+		if err2 := json.Unmarshal(data, &row); err2 != nil {
+			return nil, err
+		}
+		return []map[string]interface{}{row}, nil
+	}
+	return rows, nil
+}
 
 var version = "1.0.0"
 
@@ -116,6 +156,7 @@ func main() {
 	var quickExpected string
 	var quickAgent string
 	var quickMetrics string
+	var quickMinScoreStr string
 	var quickJudge string
 
 	quickCmd := &cobra.Command{
@@ -154,12 +195,12 @@ func main() {
 				}
 				rows = []map[string]interface{}{row}
 			} else {
-				data, err := os.ReadFile(quickDataset)
+				var err error
+				rows, err = parseDatasetFile(quickDataset)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "❌ Cannot read %s: %v\n", quickDataset, err)
 					os.Exit(2)
 				}
-				json.Unmarshal(data, &rows)
 			}
 
 			agent := quickAgent
@@ -167,12 +208,43 @@ func main() {
 				agent = "/chat"
 			}
 
-			var metricsList []string
-			if quickMetrics != "" {
-				metricsList = strings.Split(quickMetrics, ",")
-				for i := range metricsList {
-					metricsList[i] = strings.TrimSpace(metricsList[i])
+			var quickMinScore float64
+			if quickMinScoreStr != "" {
+				if v, err := config.ParseFloat(quickMinScoreStr); err == nil {
+					quickMinScore = v
 				}
+			}
+
+			// Parse metrics: strings or dicts with thresholds
+			var metricsList []interface{}
+			if quickMetrics != "" {
+				for _, item := range strings.Split(quickMetrics, ",") {
+					item = strings.TrimSpace(item)
+					if strings.Contains(item, ":") {
+						parts := strings.SplitN(item, ":", 2)
+						if v, err := config.ParseFloat(strings.TrimSpace(parts[1])); err == nil {
+							metricsList = append(metricsList, map[string]interface{}{
+								"name":      strings.TrimSpace(parts[0]),
+								"threshold": v,
+							})
+						}
+					} else if quickMinScore > 0 {
+						metricsList = append(metricsList, map[string]interface{}{
+							"name":      item,
+							"threshold": quickMinScore,
+						})
+					} else {
+						metricsList = append(metricsList, item)
+					}
+				}
+			} else if quickMinScore > 0 {
+				metricsList = append(metricsList, map[string]interface{}{
+					"name":      "faithfulness",
+					"threshold": quickMinScore,
+				}, map[string]interface{}{
+					"name":      "g_eval",
+					"threshold": quickMinScore,
+				})
 			}
 
 			result, err := client.PlaygroundEvaluate(nil, rows, agent, metricsList, quickJudge)
@@ -181,13 +253,31 @@ func main() {
 				os.Exit(2)
 			}
 
-			formatters.FormatTable(result, 0.0, url)
+			formatters.FormatTable(result, quickMinScore, url)
+
+			// CU2: exit code based on --min-score
+			if quickMinScore > 0 {
+				allPassed := true
+				if results, ok := result["results"].([]interface{}); ok {
+					for _, r := range results {
+						if m, ok := r.(map[string]interface{}); ok {
+							if passed, ok := m["passed"].(bool); ok && !passed {
+								allPassed = false
+							}
+						}
+					}
+				}
+				if !allPassed {
+					os.Exit(1)
+				}
+			}
 		},
 	}
 	quickCmd.Flags().StringVar(&quickDataset, "dataset", "", "JSON dataset file")
 	quickCmd.Flags().StringVar(&quickExpected, "expected", "", "Expected output")
 	quickCmd.Flags().StringVar(&quickAgent, "agent", "/chat", "Agent endpoint URL")
-	quickCmd.Flags().StringVar(&quickMetrics, "metrics", "", "Metrics (comma-separated)")
+	quickCmd.Flags().StringVar(&quickMetrics, "metrics", "", "Metrics: faithfulness,g_eval or faithfulness:0.90,g_eval:0.75")
+	quickCmd.Flags().StringVar(&quickMinScoreStr, "min-score", "", "Apply threshold to all metrics and enforce exit code")
 	quickCmd.Flags().StringVar(&quickJudge, "judge", "", "LLM judge model")
 	quickCmd.Flags().StringVar(&engineURLFlag, "engine-url", "", "Engine URL")
 	rootCmd.AddCommand(quickCmd)
@@ -199,11 +289,13 @@ func main() {
 	var evalMetrics string
 	var evalAgentFormat string
 	var evalMinScore string
+	var evalThresholds string
 	var evalFormat string
 	var evalCI bool
 	var evalTimeout string
 	var evalJudgeModel string
 	var evalName string
+	var evalCustomStr string
 
 	evalCmd := &cobra.Command{
 		Use:   "eval",
@@ -251,19 +343,51 @@ func main() {
 				}
 			}
 
+			// Parse per-metric thresholds
+			thresholds := make(map[string]float64)
+			if evalThresholds != "" {
+				for _, pair := range strings.Split(evalThresholds, ",") {
+					pair = strings.TrimSpace(pair)
+					parts := strings.SplitN(pair, ":", 2)
+					if len(parts) == 2 {
+						if v, err := config.ParseFloat(strings.TrimSpace(parts[1])); err == nil {
+							thresholds[strings.TrimSpace(parts[0])] = v
+						}
+					}
+				}
+			}
+
 			var result map[string]interface{}
 			var err error
 
+			var rows []map[string]interface{}
 			if evalDataset != "" {
-				result, err = client.EvaluateUpload(evalDataset, evalAgent, evalAgentFormat, strings.Join(metricsList, ","))
+				rows, err = parseDatasetFile(evalDataset)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "❌ Cannot read dataset: %v\n", err)
+					os.Exit(2)
+				}
 			} else {
-				var rows []map[string]interface{}
 				if err := json.Unmarshal([]byte(evalRows), &rows); err != nil {
 					fmt.Fprintf(os.Stderr, "❌ Invalid JSON in --rows: %v\n", err)
 					os.Exit(2)
 				}
-				result, err = client.EvaluateSync(rows, evalAgent, evalAgentFormat, metricsList, evalJudgeModel, evalName)
 			}
+			// CU3: parse inline custom evaluators
+			var customEvaluators []map[string]interface{}
+			if evalCustomStr != "" {
+				if err := json.Unmarshal([]byte(evalCustomStr), &customEvaluators); err != nil {
+					var single map[string]interface{}
+					if err2 := json.Unmarshal([]byte(evalCustomStr), &single); err2 == nil {
+						customEvaluators = []map[string]interface{}{single}
+					} else {
+						fmt.Fprintf(os.Stderr, "❌ Invalid JSON in --custom\n")
+						os.Exit(2)
+					}
+				}
+			}
+
+			result, err = client.EvaluateSync(rows, evalAgent, evalAgentFormat, metricsList, evalJudgeModel, evalName, thresholds, customEvaluators)
 
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
@@ -298,12 +422,14 @@ func main() {
 	evalCmd.Flags().StringVar(&evalRows, "rows", "", "Inline JSON array")
 	evalCmd.Flags().StringVar(&evalMetrics, "metrics", "", "Metrics (comma-separated)")
 	evalCmd.Flags().StringVar(&evalAgentFormat, "agent-format", "openai", "Agent API format")
-	evalCmd.Flags().StringVar(&evalMinScore, "min-score", "", "Minimum score threshold (0-1)")
+	evalCmd.Flags().StringVar(&evalMinScore, "min-score", "", "Minimum overall score threshold (0-1)")
+	evalCmd.Flags().StringVar(&evalThresholds, "thresholds", "", "Per-metric thresholds: faithfulness:0.90,g_eval:0.75")
 	evalCmd.Flags().StringVar(&evalFormat, "format", "table", "Output format: table, json, junit")
 	evalCmd.Flags().BoolVar(&evalCI, "ci", false, "CI mode (no colors)")
 	evalCmd.Flags().StringVar(&evalTimeout, "timeout", "300", "Timeout in seconds")
 	evalCmd.Flags().StringVar(&evalJudgeModel, "judge-model", "", "LLM judge model")
 	evalCmd.Flags().StringVar(&evalName, "name", "", "Human-readable name for this evaluation")
+	evalCmd.Flags().StringVar(&evalCustomStr, "custom", "", "Inline custom evaluator JSON")
 	evalCmd.Flags().StringVar(&apiKeyFlag, "api-key", "", "API key (overrides config)")
 	evalCmd.Flags().StringVar(&engineURLFlag, "engine-url", "", "Engine URL")
 	rootCmd.AddCommand(evalCmd)
@@ -386,6 +512,70 @@ func main() {
 	})
 
 	rootCmd.AddCommand(configCmd)
+
+	// init
+	initCmd := &cobra.Command{
+		Use:   "init",
+		Short: "Initialize a new AI Evaluator project",
+		Long:  "Creates aievaluator.config.json, evals/smoke-test.json, and updates .gitignore",
+		Run: func(cmd *cobra.Command, args []string) {
+			cwd, _ := os.Getwd()
+
+			// 1. Create aievaluator.config.json
+			configPath := filepath.Join(cwd, "aievaluator.config.json")
+			if _, err := os.Stat(configPath); err == nil {
+				fmt.Println("⏭️  aievaluator.config.json already exists, skipping")
+			} else {
+				defaults := map[string]interface{}{
+					"engine_url":        "https://api.aievaluator.dev",
+					"default_metrics":   "faithfulness,g_eval",
+					"default_min_score": 0.80,
+				}
+				b, _ := json.MarshalIndent(defaults, "", "  ")
+				os.WriteFile(configPath, append(b, '\n'), 0644)
+				fmt.Println("✅ Created aievaluator.config.json")
+			}
+
+			// 2. Create evals/ + smoke-test.json
+			evalsDir := filepath.Join(cwd, "evals")
+			os.MkdirAll(evalsDir, 0755)
+			smokePath := filepath.Join(evalsDir, "smoke-test.json")
+			if _, err := os.Stat(smokePath); err == nil {
+				fmt.Println("⏭️  evals/smoke-test.json already exists, skipping")
+			} else {
+				b, _ := json.MarshalIndent(smokeTestDataset, "", "  ")
+				os.WriteFile(smokePath, append(b, '\n'), 0644)
+				fmt.Println("✅ Created evals/smoke-test.json (3 example queries)")
+			}
+
+			// 3. Update .gitignore
+			gitignorePath := filepath.Join(cwd, ".gitignore")
+			entry := "aievaluator.config.json"
+			data, err := os.ReadFile(gitignorePath)
+			lines := ""
+			if err == nil {
+				lines = string(data)
+			}
+			if !strings.Contains(lines, entry) {
+				f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err == nil {
+					if lines != "" && !strings.HasSuffix(lines, "\n") {
+						f.WriteString("\n")
+					}
+					f.WriteString(entry + "\n")
+					f.Close()
+					fmt.Printf("✅ Added %s to .gitignore\n", entry)
+				}
+			}
+
+			fmt.Println()
+			fmt.Println("Next steps:")
+			fmt.Println("  aievaluator quick --dataset ./evals/smoke-test.json")
+			fmt.Println("  aievaluator login    (for 100 free evals/month)")
+			fmt.Println()
+		},
+	}
+	rootCmd.AddCommand(initCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

@@ -60,15 +60,18 @@ export class APIClient {
     metrics?: string[],
     judgeModel?: string,
     name?: string,
+    thresholds?: Record<string, number>,
+    customEvaluators?: Record<string, unknown>[],
   ): Promise<Record<string, unknown>> {
     const body: Record<string, unknown> = {
       rows,
       agent: { url: agentUrl, format: agentFormat },
       metrics: metrics || ['faithfulness', 'g_eval'],
-      custom_evaluators: [],
+      custom_evaluators: customEvaluators || [],
     };
     if (name) body.name = name;
     if (judgeModel) body.judge_model = judgeModel;
+    if (thresholds) body.thresholds = thresholds;
     return (await this.request('POST', '/api/v1/evaluations/sync', body)) as Record<string, unknown>;
   }
 
@@ -106,7 +109,7 @@ export class APIClient {
       rows?: Record<string, unknown>[];
       agentEndpoint?: string;
       agentConfig?: Record<string, unknown>;
-      metrics?: string[];
+      metrics?: (string | Record<string, unknown>)[];
       judge?: string;
     },
   ): Promise<Record<string, unknown>> {

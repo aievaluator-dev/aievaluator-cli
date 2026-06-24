@@ -31,25 +31,18 @@
 
 **[AI Evaluator](https://aievaluator.dev)** is an LLM-as-a-Judge platform that evaluates AI agents, RAG pipelines, and LLMs with the same rigor you apply to traditional code.
 
-This CLI brings evaluation straight to your terminal:
-- Run evals as part of your CI/CD pipeline
-- Catch regressions before they hit production
-- Block deploys that don't meet your quality thresholds
+This CLI brings evaluation straight to your terminal: run evals as part of CI/CD, catch regressions before they hit production, and block deploys that don't meet your quality thresholds.
 
 ---
 
-## 🚀 Quickstart (30 seconds)
+## 🚀 30-second Quickstart
 
 No installation. No signup. Just `curl`:
 
 ```bash
 curl -s -X POST https://api.aievaluator.dev/api/v1/playground/evaluate \
   -H "Content-Type: application/json" \
-  -d '{
-    "queries": ["What is 2+2?"],
-    "agent_endpoint": "/chat",
-    "metrics": ["faithfulness"]
-  }' | jq .
+  -d '{"queries":["What is 2+2?"],"metrics":["faithfulness"]}' | jq .
 ```
 
 ```json
@@ -60,12 +53,11 @@ curl -s -X POST https://api.aievaluator.dev/api/v1/playground/evaluate \
     "scores": {"faithfulness": 1.0},
     "passed": true
   }],
-  "remaining": 4,
-  "playground": true
+  "remaining": 4
 }
 ```
 
-> ⚡ **5 free evals/day. No signup. No API key.** Ready for CI/CD? `aievaluator login` → 100 free/month.
+> ⚡ 5 free evals/day. No signup. No API key. For CI/CD: `aievaluator login` → 100 free/month.
 
 ---
 
@@ -77,66 +69,89 @@ curl -s -X POST https://api.aievaluator.dev/api/v1/playground/evaluate \
 | Node.js | `npm install -g aievaluator` |
 | C# / .NET | `dotnet tool install -g aievaluator` |
 | Go | `go install gitlab.com/aievaluator/aievaluator-cli/go/cmd/aievaluator@latest` |
+| VS Code | Search "AI Evaluator" in Extensions |
 
 ---
 
-## 🖥️ Usage (2-minute flow)
+## 🧭 Progressive Guide
 
-```bash
-# 1. Install
-pip install aievaluator                        # or npm / dotnet / go
+The CLI is designed so you can start in 10 seconds and go as deep as you need.
 
-# 2. Try it free (no signup)
-aievaluator quick "Hello" --expected "Hi!" --metrics faithfulness
+| Level | What you learn | Time |
+|:-----:|----------------|:----:|
+| **0** | Evaluate a single prompt, no install, no key | 30s |
+| **1** | Install CLI, quick eval with expected output | 1m |
+| **2** | Scaffold a project, evaluate a dataset | 2m |
+| **3** | Quality gates with thresholds per metric | 2m |
+| **4** | Custom evaluators inline (bring your own criteria) | 1m |
+| **5** | CI/CD pipeline integration | 2m |
 
-# 3. Sign up for more (100 free evals/month)
-aievaluator login                              # get your key at aievaluator.dev/settings
-
-# 4. Create a test dataset
-echo '[{"input":"Hello","expected_output":"Hi!"},{"input":"Bye","expected_output":"Goodbye"}]' > smoke.json
-
-# 5. Evaluate your agent
-aievaluator eval \
-  --agent https://my-agent.com/chat \
-  --dataset ./smoke.json \
-  --metrics faithfulness,g_eval \
-  --min-score 0.80
-
-# 6. Exit code: 0 = passed, 1 = below threshold
-```
+📖 **Full progressive tutorials per language:**
+[Python](./python/README.md) · [Node.js](./node/README.md) · [C#](./dotnet/README.md) · [Go](./go/README.md) · [VS Code](./vscode/README.md)
 
 ---
 
 ## 📋 Commands
 
-| Command | Description | Auth |
+| Command | Auth | What it does |
 |---|---|---|
-| `aievaluator quick` | Quick eval via playground | ❌ No |
-| `aievaluator login` | Authenticate with API key | — |
-| `aievaluator whoami` | Show tenant info and usage | ✅ API Key |
-| `aievaluator eval` | Full evaluation against an agent | ✅ API Key |
-| `aievaluator config` | Manage CLI configuration | — |
-| `aievaluator init` | Scaffold a new eval project | — |
+| `aievaluator quick` | ❌ | Evaluate a prompt or dataset via playground (5/day free) |
+| `aievaluator login` | — | Save your API key (100 free/month) |
+| `aievaluator whoami` | ✅ | Show your account tier and usage |
+| `aievaluator init` | — | Create evals/ folder + sample dataset + config |
+| `aievaluator eval` | ✅ | Full evaluation against your agent with quality gates |
+| `aievaluator config` | — | Manage default metrics, thresholds, engine URL |
 
 ---
 
-## 🎮 Playground vs API Key
+## 🎯 Key Features
 
-| | Playground | API Key (free tier) |
-|---|---|---|
-| **Signup** | No | Yes (free) |
-| **Daily limit** | 5 evals | 100 evals/month |
-| **CI/CD** | No | ✅ |
-| **Custom metrics** | No | ✅ |
-| **Quality gates** | No | ✅ `--min-score` |
-| **Best for** | Trying it out | Production CI/CD |
+### Per-metric thresholds
+
+Set different quality bars for different metrics:
+
+```bash
+# faithfulness must be ≥ 90%, g_eval must be ≥ 75%
+aievaluator quick "test" --metrics faithfulness:0.90,g_eval:0.75
+
+# Same, using eval with your agent
+aievaluator eval --agent $URL --dataset ./tests.json \
+  --thresholds faithfulness:0.90,g_eval:0.75
+```
+
+### General threshold (min-score)
+
+One number for all metrics:
+
+```bash
+aievaluator quick "test" --min-score 0.80
+# Applies 0.80 to faithfulness AND g_eval. Exit code 1 if any fails.
+```
+
+### Custom evaluators (bring your own criteria)
+
+Define a custom evaluation inline — no dashboard needed:
+
+```bash
+aievaluator eval --agent $URL --dataset ./tests.json \
+  --metrics politeness \
+  --custom '{"name":"politeness","prompt":"Is the response polite?","threshold":0.85}'
+```
+
+### JSONL dataset support
+
+Both `.json` and `.jsonl` files work everywhere:
+
+```bash
+aievaluator eval --agent $URL --dataset ./queries.jsonl --min-score 0.80
+```
 
 ---
 
 ## 🔧 CI/CD Integration
 
 ```bash
-# GitHub Actions / GitLab CI / Jenkins — same command:
+# Same command works in any CI system:
 aievaluator eval \
   --agent $STAGING_AGENT \
   --dataset ./evals/regression.json \
@@ -147,60 +162,12 @@ aievaluator eval \
 # Exit code 1 blocks the pipeline if quality drops
 ```
 
-| CI System | Integration |
+| CI System | How |
 |---|---|
 | GitHub Actions | `--format junit` + `actions/upload-artifact` |
 | GitLab CI | `--format junit` + `reports:junit` |
 | Jenkins | `--format junit` + `junit 'report.xml'` |
 | Any CI | `--ci --format json` + parse exit code |
-
----
-
-## 📊 Output Formats
-
-### Table (default)
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  AI Evaluator — Results                                  │
-├──────────────────────────────────────────────────────────┤
-│  Overall Score:  87.5%  ✅ above threshold (80%)        │
-│  Total rows:     8                                       │
-│  Failed:         1                                       │
-│  Tokens:         ↓4,200 · ↑1,800                         │
-├────┬────────────────────────────────────┬────────┬───────┤
-│  # │ Query                              │ Score  │ Pass  │
-├────┼────────────────────────────────────┼────────┼───────┤
-│  1 │ What is 2+2?                       │  95%   │  ✅   │
-│  2 │ Capital of France?                 │  90%   │  ✅   │
-│  3 │ Explain quantum computing          │  72%   │  ❌   │
-└────┴────────────────────────────────────┴────────┴───────┘
-```
-
-### JSON (`--format json`)
-
-```json
-{
-  "evaluation_id": "uuid-here",
-  "overall_score": 0.875,
-  "passed": true,
-  "total_rows": 8,
-  "failed_queries": 1,
-  "results": [...]
-}
-```
-
-### JUnit XML (`--format junit`)
-
-```xml
-<?xml version="1.0"?>
-<testsuite name="AI Evaluator" tests="8" failures="1">
-  <testcase name="Query 1: What is 2+2?"></testcase>
-  <testcase name="Query 2: Capital of France?">
-    <failure message="Score 0.72 below threshold 0.80">...</failure>
-  </testcase>
-</testsuite>
-```
 
 ---
 
@@ -212,12 +179,6 @@ aievaluator eval \
 | 2 | `AIEVALUATOR_API_KEY` / `AIEVALUATOR_ENGINE_URL` env vars |
 | 3 | `./aievaluator.config.json` (project-local) |
 | 4 | `~/.config/aievaluator/config.json` (global) |
-
-```bash
-aievaluator config show                  # Show current config
-aievaluator config set default-metrics "faithfulness,g_eval"
-aievaluator login                        # Saves API key to global config
-```
 
 ---
 
@@ -234,40 +195,23 @@ aievaluator-cli/
 └── ci-templates/    → GitHub Actions / GitLab CI / Jenkins
 ```
 
-> 📖 Language-specific docs: [Python](./python/README.md) · [Node.js](./node/README.md) · [C#](./dotnet/README.md) · [Go](./go/README.md)
-
----
-
 ## 🤝 Contributing
 
 ```bash
 git clone https://gitlab.com/aievaluator/aievaluator-cli.git
 cd aievaluator-cli
-
-# Python
-cd python && pip install -e ".[dev]" && pytest
-
-# Node
-cd node && npm ci && npm test
-
-# Go
-cd go && go test ./...
-
-# .NET
-cd dotnet && dotnet test
+# Python: cd python && pip install -e ".[dev]" && pytest
+# Node:   cd node && npm ci && npm test
+# Go:     cd go && go test ./...
+# .NET:   cd dotnet && dotnet test
 ```
 
----
+## 👤 Author
+
+**Franco Vinciarelli** — [@fvinciarelli](https://github.com/fvinciarelli)
+
+Built with ❤️ by a solo dev. Building tools to make AI agents testable and reliable.
 
 ## 📄 License
 
 MIT © [AI Evaluator](https://aievaluator.dev)
-
----
-
-## 🔗 Links
-
-- [AI Evaluator](https://aievaluator.dev) — Platform dashboard
-- [API Docs](https://api.aievaluator.dev/docs) — Swagger UI
-- [Issues](https://gitlab.com/aievaluator/aievaluator-cli/-/issues)
-- [Support](mailto:support@aievaluator.dev)

@@ -88,9 +88,13 @@ func (c *Client) GetUsage() (map[string]interface{}, error) {
 	return c.request("GET", "/api/v1/tenants/me/usage", nil)
 }
 
-func (c *Client) EvaluateSync(rows []map[string]interface{}, agentURL, agentFormat string, metrics []string, judgeModel, name string) (map[string]interface{}, error) {
+func (c *Client) EvaluateSync(rows []map[string]interface{}, agentURL, agentFormat string, metrics []string, judgeModel, name string, thresholds map[string]float64, customEvaluators []map[string]interface{}) (map[string]interface{}, error) {
 	if metrics == nil {
 		metrics = []string{"faithfulness", "g_eval"}
+	}
+	ce := customEvaluators
+	if ce == nil {
+		ce = []map[string]interface{}{}
 	}
 	body := map[string]interface{}{
 		"rows": rows,
@@ -99,13 +103,16 @@ func (c *Client) EvaluateSync(rows []map[string]interface{}, agentURL, agentForm
 			"format": agentFormat,
 		},
 		"metrics":           metrics,
-		"custom_evaluators": []interface{}{},
+		"custom_evaluators": ce,
 	}
 	if name != "" {
 		body["name"] = name
 	}
 	if judgeModel != "" {
 		body["judge_model"] = judgeModel
+	}
+	if len(thresholds) > 0 {
+		body["thresholds"] = thresholds
 	}
 	return c.request("POST", "/api/v1/evaluations/sync", body)
 }
@@ -159,9 +166,9 @@ func (c *Client) EvaluateUpload(filePath, agentURL, agentFormat, metrics string)
 	return result, nil
 }
 
-func (c *Client) PlaygroundEvaluate(queries []string, rows []map[string]interface{}, agentEndpoint string, metrics []string, judge string) (map[string]interface{}, error) {
+func (c *Client) PlaygroundEvaluate(queries []string, rows []map[string]interface{}, agentEndpoint string, metrics []interface{}, judge string) (map[string]interface{}, error) {
 	if metrics == nil {
-		metrics = []string{"faithfulness", "g_eval"}
+		metrics = []interface{}{"faithfulness", "g_eval"}
 	}
 	body := map[string]interface{}{
 		"metrics": metrics,

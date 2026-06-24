@@ -82,6 +82,7 @@ class APIClient:
         judge_model: Optional[str] = None,
         name: Optional[str] = None,
         custom_evaluators: list[dict] | None = None,
+        thresholds: Optional[dict[str, float]] = None,
     ) -> dict:
         """POST /api/v1/evaluations/sync"""
         agent_json = {"url": agent_url, "format": agent_format}
@@ -95,6 +96,8 @@ class APIClient:
             body["name"] = name
         if judge_model:
             body["judge_model"] = judge_model
+        if thresholds:
+            body["thresholds"] = thresholds
 
         return await self._request("POST", "/api/v1/evaluations/sync", json_data=body)
 
@@ -145,10 +148,14 @@ class APIClient:
         rows: Optional[list[dict]] = None,
         agent_endpoint: Optional[str] = None,
         agent_config: Optional[dict] = None,
-        metrics: Optional[list[str]] = None,
+        metrics: Optional[list] = None,
         judge: Optional[str] = None,
     ) -> dict:
-        """POST /api/v1/playground/evaluate (no auth required)."""
+        """POST /api/v1/playground/evaluate (no auth required).
+
+        metrics accepts strings or dicts with thresholds:
+        ["g_eval"] or [{"name": "g_eval", "threshold": 0.9}]
+        """
         body: dict = {"metrics": metrics or ["faithfulness", "g_eval"]}
         if queries:
             body["queries"] = queries

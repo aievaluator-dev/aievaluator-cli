@@ -13,6 +13,8 @@
     "onCommand:aievaluator.evaluateFile",
     "onCommand:aievaluator.setAPIKey",
     "onCommand:aievaluator.generateCISnippet",
+    "onCommand:aievaluator.init",
+    "onCommand:aievaluator.addCustomEvaluator",
     "onView:aievaluator.sidebar"
   ],
   "main": "./out/extension.js",
@@ -37,6 +39,14 @@
       {
         "command": "aievaluator.generateCISnippet",
         "title": "AI Evaluator: Generate CI/CD Snippet"
+      },
+      {
+        "command": "aievaluator.init",
+        "title": "AI Evaluator: Initialize Eval Project"
+      },
+      {
+        "command": "aievaluator.addCustomEvaluator",
+        "title": "AI Evaluator: Add Custom Evaluator"
       }
     ],
     "menus": {
@@ -49,7 +59,7 @@
         {
           "command": "aievaluator.evaluateFile",
           "group": "aievaluator",
-          "when": "resourceExtname == .json"
+          "when": "resourceExtname == .json || resourceExtname == .jsonl"
         }
       ],
       "commandPalette": [
@@ -59,13 +69,19 @@
         },
         {
           "command": "aievaluator.evaluateFile",
-          "when": "resourceExtname == .json"
+          "when": "resourceExtname == .json || resourceExtname == .jsonl"
         },
         {
           "command": "aievaluator.setAPIKey"
         },
         {
           "command": "aievaluator.generateCISnippet"
+        },
+        {
+          "command": "aievaluator.init"
+        },
+        {
+          "command": "aievaluator.addCustomEvaluator"
         }
       ]
     },
