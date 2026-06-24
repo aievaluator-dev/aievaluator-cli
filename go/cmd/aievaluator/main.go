@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitlab.com/aievaluator/aievaluator-cli/go/internal/api"
-	"gitlab.com/aievaluator/aievaluator-cli/go/internal/config"
-	"gitlab.com/aievaluator/aievaluator-cli/go/internal/formatters"
+	"github.com/aievaluator-dev/aievaluator-cli/go/internal/api"
+	"github.com/aievaluator-dev/aievaluator-cli/go/internal/config"
+	"github.com/aievaluator-dev/aievaluator-cli/go/internal/formatters"
 
 	"github.com/spf13/cobra"
 )

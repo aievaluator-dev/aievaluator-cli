@@ -68,7 +68,7 @@ curl -s -X POST https://api.aievaluator.dev/api/v1/playground/evaluate \
 | Python | `pip install aievaluator` |
 | Node.js | `npm install -g aievaluator` |
 | C# / .NET | `dotnet tool install -g aievaluator` |
-| Go | `go install gitlab.com/aievaluator/aievaluator-cli/go/cmd/aievaluator@latest` |
+| Go | `go install github.com/aievaluator-dev/aievaluator-cli/go/cmd/aievaluator@latest` |
 | VS Code | Search "AI Evaluator" in Extensions |
 
 ---

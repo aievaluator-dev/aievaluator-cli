@@ -3,7 +3,7 @@
 Evaluate your LLM agents from the terminal. No browser. No dashboard.
 
 ```bash
-go install gitlab.com/aievaluator/aievaluator-cli/go/cmd/aievaluator@latest
+go install github.com/aievaluator-dev/aievaluator-cli/go/cmd/aievaluator@latest
 ```
 
 ---
@@ -25,7 +25,7 @@ curl -s -X POST https://api.aievaluator.dev/api/v1/playground/evaluate \
 ### Level 1 — Install and quick eval
 
 ```bash
-go install gitlab.com/aievaluator/aievaluator-cli/go/cmd/aievaluator@latest
+go install github.com/aievaluator-dev/aievaluator-cli/go/cmd/aievaluator@latest
 
 aievaluator quick "What is the capital of France?" --expected "Paris"
 ```

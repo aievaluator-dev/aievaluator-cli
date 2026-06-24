@@ -1,4 +1,4 @@
-module gitlab.com/aievaluator/aievaluator-cli/go
+module github.com/aievaluator-dev/aievaluator-cli/go
 
 go 1.22
 
