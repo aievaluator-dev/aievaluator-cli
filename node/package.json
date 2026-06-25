@@ -3,15 +3,24 @@
   "version": "1.0.0",
   "description": "AI Evaluator CLI — evaluate your LLM agents from the command line",
   "bin": {
-    "aievaluator": "./dist/index.js"
+    "aievaluator": "./dist/cli.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "echo 'Tests OK'"
+    "test": "vitest run"
   },
-  "keywords": ["ai", "evaluation", "llm", "agent", "testing", "ci-cd"],
+  "keywords": [
+    "ai",
+    "evaluation",
+    "llm",
+    "agent",
+    "testing",
+    "ci-cd"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -25,7 +34,9 @@
   },
   "devDependencies": {
     "@types/node": "^20",
-    "typescript": "^5.5"
+    "msw": "^2.14.6",
+    "typescript": "^5.5",
+    "vitest": "^4.1.9"
   },
   "engines": {
     "node": ">=18"

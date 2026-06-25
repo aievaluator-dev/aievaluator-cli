@@ -1,0 +1,6 @@
+{
+  "api_key": "sk-test",
+  "engine_url": "https://test.dev",
+  "default_metrics": "faithfulness",
+  "default_min_score": 0.8
+}
