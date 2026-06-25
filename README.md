@@ -23,6 +23,7 @@
   <a href="https://marketplace.visualstudio.com/items?itemName=aievaluator.aievaluator"><img src="https://img.shields.io/visual-studio-marketplace/v/aievaluator.aievaluator?label=VS%20Code" alt="VS Code"></a>
   <a href="https://github.com/aievaluator-dev/aievaluator-cli/actions"><img src="https://github.com/aievaluator-dev/aievaluator-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="https://github.com/aievaluator-dev/aievaluator-cli/graphs/contributors"><img src="https://contrib.rocks/image?repo=aievaluator-dev/aievaluator-cli" alt="Contributors"></a>
 </p>
 
 ---
@@ -206,12 +207,15 @@ cd aievaluator-cli
 # .NET:   cd dotnet && dotnet test
 ```
 
-## 👤 Author
+## ✨ Contributors
 
-**Franco Vinciarelli**
+<a href="https://github.com/aievaluator-dev/aievaluator-cli/graphs/contributors"><img src="https://contrib.rocks/image?repo=aievaluator-dev/aievaluator-cli" width="48"></a>
 
-[![GitHub](https://img.shields.io/badge/GitHub-@fvinciarelli-181717?logo=github)](https://github.com/fvinciarelli)
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-Franco%20Vinciarelli-0A66C2?logo=linkedin)](https://www.linkedin.com/in/vinciarellifranco/)
+See [CONTRIBUTORS.md](./CONTRIBUTORS.md) and [CONTRIBUTING.md](./.github/CONTRIBUTING.md).
+
+| | |
+|---|---|
+| **Franco Vinciarelli** — Creator & Maintainer | [![GitHub](https://img.shields.io/badge/GitHub-@fvinciarelli-181717?logo=github)](https://github.com/fvinciarelli) [![LinkedIn](https://img.shields.io/badge/LinkedIn-Franco%20Vinciarelli-0A66C2?logo=linkedin)](https://www.linkedin.com/in/vinciarellifranco/) |
 
 ## 📄 License
 
