@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [master, main]
+    tags: ['python-v*', 'node-v*', 'dotnet-v*', 'go-v*', 'vscode-v*']
   pull_request:
     branches: [master, main]
 
@@ -71,3 +72,94 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run compile
+
+  # ── Publish jobs (only on version tags) ─────────────────────────
+
+  publish-python:
+    if: startsWith(github.ref, 'refs/tags/python-v')
+    needs: python
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine upload dist/*
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+
+  publish-node:
+    if: startsWith(github.ref, 'refs/tags/node-v')
+    needs: node
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-dotnet:
+    if: startsWith(github.ref, 'refs/tags/dotnet-v')
+    needs: dotnet
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dotnet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0'
+      - run: dotnet pack src/ --configuration Release --output ./nupkg
+      - run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_TOKEN }} --source https://api.nuget.org/v3/index.json
+
+  publish-go:
+    if: startsWith(github.ref, 'refs/tags/go-v')
+    needs: go
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Go module tag matches
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/go-v}"
+          FILE_VERSION=$(cat VERSION)
+          if [ "$TAG_VERSION" != "$FILE_VERSION" ]; then
+            echo "Error: tag version ($TAG_VERSION) != VERSION file ($FILE_VERSION)"
+            exit 1
+          fi
+          echo "Go module $TAG_VERSION ready — no registry push needed (Go uses git tags)."
+
+  publish-vscode:
+    if: startsWith(github.ref, 'refs/tags/vscode-v')
+    needs: vscode
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm install -g @vscode/vsce
+      - run: vsce publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_TOKEN }}

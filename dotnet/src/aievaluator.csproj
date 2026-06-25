@@ -11,7 +11,7 @@
     <Version>1.0.0</Version>
     <Description>AI Evaluator CLI — evaluate your LLM agents from the command line</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <RepositoryUrl>https://gitlab.com/aievaluator/aievaluator-cli</RepositoryUrl>
+    <RepositoryUrl>https://github.com/aievaluator-dev/aievaluator-cli</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
