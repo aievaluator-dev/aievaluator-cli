@@ -2,15 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
-    paths:
-      - 'python/**'
-      - 'node/**'
-      - 'go/**'
-      - 'dotnet/**'
-      - 'vscode/**'
+    branches: [master, main]
   pull_request:
-    branches: [master]
+    branches: [master, main]
 
 jobs:
   python:
@@ -37,7 +31,6 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - run: npm run build
       - run: npm test
 
   go:

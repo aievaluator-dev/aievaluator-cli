@@ -208,7 +208,11 @@ cd aievaluator-cli
 
 ## 👤 Author
 
-**Franco Vinciarelli** — [@fvinciarelli](https://github.com/fvinciarelli)
+**Franco Vinciarelli**
+
+[![GitHub](https://img.shields.io/badge/GitHub-@fvinciarelli-181717?logo=github)](https://github.com/fvinciarelli)
+[![GitLab](https://img.shields.io/badge/GitLab-@fvinciarelli-FC6D26?logo=gitlab)](https://gitlab.com/fvinciarelli)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-Franco%20Vinciarelli-0A66C2?logo=linkedin)](https://www.linkedin.com/in/vinciarellifranco/)
 
 ## 📄 License
 
