@@ -21,7 +21,7 @@
   <a href="https://www.npmjs.com/package/aievaluator"><img src="https://img.shields.io/npm/v/aievaluator?label=npm" alt="npm"></a>
   <a href="https://www.nuget.org/packages/aievaluator"><img src="https://img.shields.io/nuget/v/aievaluator?label=NuGet" alt="NuGet"></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=aievaluator.aievaluator"><img src="https://img.shields.io/visual-studio-marketplace/v/aievaluator.aievaluator?label=VS%20Code" alt="VS Code"></a>
-  <a href="https://gitlab.com/aievaluator/aievaluator-cli/-/pipelines"><img src="https://gitlab.com/aievaluator/aievaluator-cli/badges/master/pipeline.svg" alt="CI"></a>
+  <a href="https://github.com/aievaluator-dev/aievaluator-cli/actions"><img src="https://github.com/aievaluator-dev/aievaluator-cli/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
 </p>
 
@@ -198,7 +198,7 @@ aievaluator-cli/
 ## 🤝 Contributing
 
 ```bash
-git clone https://gitlab.com/aievaluator/aievaluator-cli.git
+git clone https://github.com/aievaluator-dev/aievaluator-cli.git
 cd aievaluator-cli
 # Python: cd python && pip install -e ".[dev]" && pytest
 # Node:   cd node && npm ci && npm test
@@ -211,7 +211,6 @@ cd aievaluator-cli
 **Franco Vinciarelli**
 
 [![GitHub](https://img.shields.io/badge/GitHub-@fvinciarelli-181717?logo=github)](https://github.com/fvinciarelli)
-[![GitLab](https://img.shields.io/badge/GitLab-@fvinciarelli-FC6D26?logo=gitlab)](https://gitlab.com/fvinciarelli)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-Franco%20Vinciarelli-0A66C2?logo=linkedin)](https://www.linkedin.com/in/vinciarellifranco/)
 
 ## 📄 License
