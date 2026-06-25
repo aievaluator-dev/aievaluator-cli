@@ -40,5 +40,10 @@ dev = [
 [project.scripts]
 aievaluator = "aievaluator.cli:main"
 
+[project.urls]
+Homepage = "https://aievaluator.dev"
+Repository = "https://github.com/aievaluator-dev/aievaluator-cli"
+Issues = "https://github.com/aievaluator-dev/aievaluator-cli/issues"
+
 [tool.setuptools.packages.find]
 where = ["src"]
