@@ -109,16 +109,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       - run: npm run build
-      - name: Debug OIDC identity
-        run: |
-          echo "=== npm whoami ==="
-          npm whoami || echo "NOT AUTHENTICATED"
-          echo "=== npm config get registry ==="
-          npm config get registry
-          echo "=== npm config list (auth redacted) ==="
-          npm config list 2>&1 | sed 's/:_authToken=[^ ]*/:_authToken=***/g'
       - run: npm publish --access public --provenance
 
   publish-dotnet:
