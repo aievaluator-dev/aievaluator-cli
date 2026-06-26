@@ -98,6 +98,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/node-v')
     needs: node
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     defaults:
       run:
         working-directory: node
@@ -106,12 +108,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Build and publish
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
-          npm ci
-          npm run build
-          npm publish --access public
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm run build
+      - run: npm publish --provenance --access public
 
   publish-dotnet:
     if: startsWith(github.ref, 'refs/tags/dotnet-v')
