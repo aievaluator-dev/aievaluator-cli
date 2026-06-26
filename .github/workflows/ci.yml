@@ -58,7 +58,7 @@ jobs:
         with:
           dotnet-version: '8.0'
       - run: dotnet build src/
-      - run: dotnet test
+      - run: dotnet test tests/
 
   vscode:
     runs-on: ubuntu-latest
