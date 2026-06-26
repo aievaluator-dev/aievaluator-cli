@@ -8,11 +8,17 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>aievaluator</ToolCommandName>
     <PackageId>aievaluator</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Description>AI Evaluator CLI — evaluate your LLM agents from the command line</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/aievaluator-dev/aievaluator-cli</RepositoryUrl>
+    <PackageProjectUrl>https://www.aievaluator.dev</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
