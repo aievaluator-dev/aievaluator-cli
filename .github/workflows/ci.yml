@@ -113,12 +113,15 @@ jobs:
       - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run build
-      - run: npm publish --access public
+      - run: npm publish --access public --provenance
 
   publish-dotnet:
     if: startsWith(github.ref, 'refs/tags/dotnet-v')
     needs: dotnet
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     defaults:
       run:
         working-directory: dotnet
@@ -128,7 +131,7 @@ jobs:
         with:
           dotnet-version: '8.0'
       - run: dotnet pack src/ --configuration Release --output ./nupkg
-      - run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_TOKEN }} --source https://api.nuget.org/v3/index.json
+      - run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json
 
   publish-go:
     if: startsWith(github.ref, 'refs/tags/go-v')
