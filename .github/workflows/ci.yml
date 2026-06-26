@@ -116,11 +116,10 @@ jobs:
         run: |
           echo "=== npm whoami ==="
           npm whoami || echo "NOT AUTHENTICATED"
-          echo "=== npm token list ==="
-          npm token list 2>&1 || echo "NO TOKENS"
-          echo "=== .npmrc ==="
-          cat ~/.npmrc 2>/dev/null || echo "no ~/.npmrc"
-          cat .npmrc 2>/dev/null || echo "no local .npmrc"
+          echo "=== npm config get registry ==="
+          npm config get registry
+          echo "=== npm config list (auth redacted) ==="
+          npm config list 2>&1 | sed 's/:_authToken=[^ ]*/:_authToken=***/g'
       - run: npm publish --access public --provenance
 
   publish-dotnet:
