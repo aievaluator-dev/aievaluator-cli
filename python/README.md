@@ -317,20 +317,6 @@ Native CI integration. `<testcase>` per query, `<failure>` for queries below thr
 
 ---
 
-## 🤖 VS Code Extension
-
-Prefer staying in your editor? Install the [VS Code extension](https://marketplace.visualstudio.com/items?itemName=aievaluator.aievaluator).
-
-- Select text → right-click → Evaluate
-- Per-metric threshold editor with preset buttons
-- Custom evaluator support via Command Palette
-- Sidebar with evaluation history
-- Dataset file evaluation (JSON + JSONL)
-
-[Full VS Code tutorial →](../vscode/README.md)
-
----
-
 ## Requirements
 
 - Python 3.10+
