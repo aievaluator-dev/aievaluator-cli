@@ -131,7 +131,11 @@ jobs:
         with:
           dotnet-version: '8.0'
       - run: dotnet pack src/ --configuration Release --output ./nupkg
-      - run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json
+      - uses: NuGet/login@v1
+        id: login
+        with:
+          user: aievaluator
+      - run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
 
   publish-go:
     if: startsWith(github.ref, 'refs/tags/go-v')
