@@ -112,7 +112,16 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       - run: npm run build
-      - run: npm publish --access public
+      - name: Debug OIDC identity
+        run: |
+          echo "=== npm whoami ==="
+          npm whoami || echo "NOT AUTHENTICATED"
+          echo "=== npm token list ==="
+          npm token list 2>&1 || echo "NO TOKENS"
+          echo "=== .npmrc ==="
+          cat ~/.npmrc 2>/dev/null || echo "no ~/.npmrc"
+          cat .npmrc 2>/dev/null || echo "no local .npmrc"
+      - run: npm publish --access public --provenance
 
   publish-dotnet:
     if: startsWith(github.ref, 'refs/tags/dotnet-v')
