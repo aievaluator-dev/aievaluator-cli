@@ -201,7 +201,7 @@ async function pickEvalOptions(query, hasApiKey) {
             value: vscode.workspace.getConfiguration('aievaluator').get('defaultAgent') || '',
         }) || '/chat';
     }
-    // ── Step 2: pick metrics (include PRO_METRICS if API key is set) ──
+    // ── Step 2: pick metrics (PRO_METRICS when API key is set) ──
     const availableMetrics = hasApiKey ? [...ALL_METRICS, ...PRO_METRICS] : ALL_METRICS;
     const metricItems = [
         ...availableMetrics.map(m => ({
@@ -350,8 +350,8 @@ async function evaluateSelection() {
         return;
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Evaluating...' }, async () => {
         try {
-            if (apiKey && opts.agent !== '/chat') {
-                // Eval endpoint (API key + external agent)
+            if (apiKey) {
+                // Eval endpoint (API key → all 5 metrics, any agent)
                 const body = {
                     rows: [{ input: selection, expected_output: opts.expected || undefined }],
                     agent: { url: opts.agent, format: 'openai' },
@@ -431,7 +431,7 @@ async function evaluateDataset(document) {
         return;
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Evaluating ${count} queries...` }, async () => {
         try {
-            if (apiKey && opts.agent !== '/chat') {
+            if (apiKey) {
                 const body = {
                     rows,
                     agent: { url: opts.agent, format: 'openai' },

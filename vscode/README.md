@@ -1,200 +1,196 @@
 # AI Evaluator — VS Code Extension
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/aievaluator.aievaluator?label=VS%20Code)](https://marketplace.visualstudio.com/items?itemName=aievaluator.aievaluator)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/aievaluator.aievaluator?label=VS%20Code&color=6A5ACD)](https://marketplace.visualstudio.com/items?itemName=aievaluator.aievaluator)
+[![Installs](https://img.shields.io/visual-studio-marketplace/i/aievaluator.aievaluator?label=Installs&color=success)](https://marketplace.visualstudio.com/items?itemName=aievaluator.aievaluator)
+[![Rating](https://img.shields.io/visual-studio-marketplace/r/aievaluator.aievaluator?label=Rating&color=brightgreen)](https://marketplace.visualstudio.com/items?itemName=aievaluator.aievaluator)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-Evaluate your AI agents without leaving your editor. Select text, pick metrics, set thresholds, run.
+**Ship AI agents with confidence.** Evaluate your LLM agents directly from VS Code — catch regressions, set quality gates, and block bad deployments before your users see them.
 
----
-
-## 📦 Install
-
-Search **"AI Evaluator"** in VS Code Extensions (`Ctrl+Shift+X`), or:
-
-```bash
-code --install-extension aievaluator.aievaluator
-```
+![AI Evaluator extension in VS Code — evaluate from command palette](images/hero-01-agent-pick.png)
 
 ---
 
-## 🧭 Tutorial — From First Click to Power User
+## 🤔 Why AI Evaluator?
+
+Writing evals for AI agents is painful: you juggle scripts, dashboards, and CI pipelines. **AI Evaluator brings everything into your editor.**
+
+| 😤 Without | 😌 With |
+|---|---|
+| Write ad-hoc scripts in Python | Select text, right-click, done |
+| Switch between editor and browser | Stay in VS Code |
+| Guess if your agent got better | See scores and pass/fail instantly |
+| No CI/CD integration | 1-click GitHub Actions snippet |
 
 ---
 
-### Level 0 — Your first evaluation (10 seconds)
+## ⚡ 60-Second Quickstart
 
-1. Open any file. Type or select: `What is the capital of France?`
+No signup. No API key. Just VS Code.
+
+1. Open any file. Type: `What is the capital of France?`
 2. Right-click → **AI Evaluator: Evaluate from editor**
-3. Pick an agent (default: 🧪 Internal agent, free)
-4. Check the metrics you want → press **Enter**
-5. In the threshold form, click **▶ Run Evaluation**
+3. Pick an agent → check metrics → press **▶ Run Evaluation**
 
 ```
-AI Evaluator: g_eval: 92% · faithfulness: 100% ✅
+🧪 AI Evaluator: g_eval 92% · faithfulness 100% ✅
 ```
 
-> ⚡ 5 free evals/day via playground. No signup. No API key.
+> ⚡ **5 free evals/day** via playground. Upgrade to 100/month free with API key → [aievaluator.dev/settings](https://aievaluator.dev/settings)
 
 ---
 
-### Level 1 — Expected output
+## 🎯 Features
 
-In the threshold form (step 3), fill the **Expected output** field:
+### Per-Metric Quality Gates
+
+Different metrics, different standards. Set individual thresholds for each one:
 
 ```
-Expected output (optional)
-┌─────────────────────────────────────────┐
-│ Paris                                   │
-└─────────────────────────────────────────┘
+Metric              Threshold
+─────────────────────────────
+g_eval              [0.70]
+faithfulness        [0.90]  ← hallucinations fail instantly
+bias                [0.80]
 ```
 
-The judge compares the agent's response against your expected output. Leave it empty
-for open-ended evaluation.
+The evaluation fails if **any** metric drops below its bar. Exit code 1 in CI/CD.
 
 ---
 
-### Level 2 — Per-metric thresholds
+![Custom evaluator — define your own criteria inline](images/feature-custom-evaluator.png)
 
-Each metric gets its own threshold in the form. Change the values before running:
+### Custom Evaluators
+
+Bring your own criteria. Define evaluators inline without leaving the editor:
 
 ```
-Metric          Description              Threshold
-─────────────────────────────────────────────────
-g_eval          General LLM-as-a-Judge   [0.7  ]
-faithfulness    Factual accuracy...      [0.9  ]
+Command Palette → AI Evaluator: Add Custom Evaluator
+┌──────────────────────────────────────────────────┐
+│ Name:       politeness                           │
+│ Prompt:     Is the response polite and           │
+│             professional? Answer YES or NO.      │
+│ Threshold:  0.85                                 │
+└──────────────────────────────────────────────────┘
 ```
 
-The evaluation fails if any metric drops below its threshold. Type directly in the
-number fields — they accept values from 0.0 to 1.0 in 0.05 steps.
+Your custom evaluator appears in the metrics list as `🔧 politeness`. Add as many as you need.
 
 ---
 
-### Level 3 — Scaffold your project
+### Dataset Evaluation
 
-Command Palette (`Ctrl+Shift+P`) → **AI Evaluator: Initialize Eval Project**
+Evaluate entire datasets with one click:
 
-Creates `aievaluator.config.json`, `evals/smoke-test.json`, and updates `.gitignore`.
-
-Edit `evals/smoke-test.json` with your test cases, then right-click the file → **Evaluate this dataset**.
+- Right-click any `.json` or `.jsonl` file → **Evaluate this dataset**
+- Code Lens appears above dataset files: `🧪 Evaluate this dataset`
+- Results open as formatted JSON in a new editor tab
+- Line-by-line scores, pass/fail per row, token counts
 
 ---
 
-### Level 4 — Set your API key
+### Sidebar History
 
-For more than 5 evals/day and access to all metrics:
+Click the 🧪 icon in the activity bar. Your last 20 evaluations with scores, timestamps, and pass/fail status. Re-run or clear from the sidebar.
 
-1. Command Palette → **AI Evaluator: Set API Key**
-2. Paste your key from [aievaluator.dev/settings](https://aievaluator.dev/settings)
+---
 
-With an API key set and an external agent, the extension switches to the **eval endpoint**:
+![Generate CI/CD Snippet — one click to GitHub Actions](images/feature-ci-snippet.png)
 
-| Without API Key | With API Key |
+### CI/CD Integration
+
+Command Palette → **AI Evaluator: Generate CI/CD Snippet** → picks your dataset → generates a complete GitHub Actions workflow.
+
+```yaml
+- run: aievaluator eval --dataset ./evals/regression.json --min-score 0.80 --ci --format junit
+```
+
+GitLab CI and Jenkins templates included.
+
+---
+
+### All Metrics
+
+| Metric | What it checks |
 |---|---|
-| Playground (5/day) | Eval endpoint (100/month free) |
-| `g_eval`, `faithfulness` only | All 5 metrics + custom evaluators |
-| Internal agent only | Your external agent |
+| `g_eval` | General LLM-as-a-Judge quality |
+| `faithfulness` | Factual accuracy — no hallucinations |
+| `hallucination` | Fabricated information detection |
+| `bias` | Fairness and neutrality |
+| `answer_relevancy` | Does the answer address the query? |
+
+Advanced metrics unlock with an API key and external agent.
 
 ---
 
-### Level 5 — All metrics unlocked
+## ⌨️ Commands
 
-Once your API key is set and you pick an external agent, the metrics list expands:
-
-```
-☑ g_eval              General LLM-as-a-Judge evaluation
-☑ faithfulness        Factual accuracy vs context (RAG)
-☐ hallucination       Detects fabricated information
-☐ bias                Identifies biased outputs
-☐ answer_relevancy    How well the answer addresses the query
-```
-
-Select `hallucination: 0.8` to catch made-up answers, or `bias: 0.8` for fairness checks.
-
----
-
-### Level 6 — Custom evaluators
-
-Define your own evaluation criteria. Command Palette → **AI Evaluator: Add Custom Evaluator**:
-
-1. **Name:** `politeness`
-2. **Prompt:** `Is the response polite and professional? Answer YES or NO.`
-3. **Threshold:** `0.85`
-
-Your custom evaluator appears in the metrics list as `🔧 politeness`. Select it, set its
-threshold in the form, and run. Add as many as you need — they persist for the session.
-
----
-
-### Level 7 — Dataset evaluation (JSON + JSONL)
-
-Right-click any `.json` or `.jsonl` file → **Evaluate this dataset**.
-
-A Code Lens appears above dataset files in `evals/`:
-
-```
-🧪 Evaluate this dataset    ← click
-```
-
-The extension parses `.jsonl` line-by-line and evaluates all queries. Results open
-in a new editor tab as formatted JSON.
-
----
-
-### Level 8 — CI/CD snippet
-
-Command Palette → **AI Evaluator: Generate CI/CD Snippet**
-
-Enter your dataset path → a complete GitHub Actions workflow opens in a new tab.
-Copy it to `.github/workflows/ai-quality.yml`.
-
----
-
-### Level 9 — Sidebar history
-
-Click the 🧪 icon in the activity bar to open the **AI Evaluator sidebar**.
-
-Shows your last 20 evaluations with scores, timestamps, and pass/fail. Use the buttons
-to re-run or clear history.
-
----
-
-## 🎮 Features
-
-| Feature | How |
+| Command | When to use |
 |---|---|
-| Quick eval | Right-click selected text → Evaluate |
-| Expected output | Type in the threshold form |
-| Per-metric thresholds | Number fields in the threshold form |
-| Advanced metrics | Set API key + external agent → hallucination, bias, answer_relevancy |
-| Custom evaluators | Command Palette → Add Custom Evaluator |
-| Dataset evaluation | Right-click `.json`/`.jsonl` → Evaluate |
-| Code Lens | `🧪 Evaluate this dataset` above dataset files |
-| Sidebar history | 🧪 icon in activity bar |
-| API key | Command Palette → Set API Key (stored in secrets) |
-| CI/CD snippet | Command Palette → Generate CI/CD Snippet |
-| Project init | Command Palette → Initialize Eval Project |
+| **AI Evaluator: Evaluate from editor** | Evaluate selected text or open file |
+| **AI Evaluator: Set API Key** | Unlock advanced metrics + 100 evals/month |
+| **AI Evaluator: Add Custom Evaluator** | Define your own evaluation criteria |
+| **AI Evaluator: Generate CI/CD Snippet** | Get GitHub Actions / GitLab CI / Jenkins workflow |
+| **AI Evaluator: Initialize Eval Project** | Create `evals/` folder + sample dataset + config |
 
 ---
 
-## ⚙️ Workspace Settings
-
-Add to `.vscode/settings.json`:
+## ⚙️ Settings
 
 ```json
 {
   "aievaluator.defaultAgent": "https://my-agent.com/chat",
   "aievaluator.defaultMetrics": "g_eval",
+  "aievaluator.defaultThreshold": 0.80,
   "aievaluator.engineUrl": "https://api.aievaluator.dev"
 }
 ```
 
+| Setting | Default | Description |
+|---|---|---|
+| `aievaluator.defaultAgent` | Internal (free) | Your agent's endpoint URL |
+| `aievaluator.defaultMetrics` | `g_eval` | Comma-separated metrics |
+| `aievaluator.defaultThreshold` | `0.80` | Default quality gate for all metrics |
+| `aievaluator.engineUrl` | `https://api.aievaluator.dev` | API endpoint |
+
 ---
 
-## 🐛 Debug
+## ❓ FAQ
 
-See [DEBUG.md](./DEBUG.md) to run the extension in development mode.
+**Is it free?**
+Yes — 5 evals/day via playground, 100/month free with API key. No credit card required.
+
+**What agents does it support?**
+Any agent with an HTTP endpoint. OpenAI-compatible, Claude, custom APIs — if it speaks JSON, it works.
+
+**What metrics are available?**
+`g_eval`, `faithfulness`, `hallucination`, `bias`, `answer_relevancy`, plus your own custom evaluators.
+
+**Does it work offline?**
+No — evaluations run against the AI Evaluator engine at `api.aievaluator.dev`.
+
+**Can I use it in CI/CD?**
+Yes — the **Generate CI/CD Snippet** command gives you a ready-to-use workflow for GitHub Actions, GitLab CI, or Jenkins.
+
+**Is my data safe?**
+Your prompts and responses are sent to our engine for evaluation. We don't store them beyond what's needed for the evaluation. See [aievaluator.dev/privacy](https://aievaluator.dev/privacy).
 
 ---
 
-## Requirements
+## 🛠️ Development
 
-- VS Code 1.85+
+```bash
+git clone https://github.com/aievaluator-dev/aievaluator-cli.git
+cd aievaluator-cli/vscode
+npm ci
+npm run compile
+# Press F5 in VS Code to launch Extension Development Host
+```
+
+See [DEBUG.md](./DEBUG.md) for detailed development instructions.
+
+---
+
+## 📄 License
+
+MIT © [AI Evaluator](https://aievaluator.dev)

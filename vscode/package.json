@@ -7,7 +7,15 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Testing", "AI"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aievaluator-dev/aievaluator-cli.git",
+    "directory": "vscode"
+  },
+  "categories": [
+    "Testing",
+    "AI"
+  ],
   "activationEvents": [
     "onCommand:aievaluator.evaluateSelection",
     "onCommand:aievaluator.evaluateFile",
@@ -128,8 +136,12 @@
     "package": "vsce package"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^26.0.0",
     "@types/vscode": "^1.85.0",
-    "typescript": "^5.5"
+    "@vscode/test-web": "^0.0.81",
+    "playwright": "^1.61.1",
+    "typescript": "^5.5",
+    "vscode-extension-tester": "^8.23.0"
   }
 }
