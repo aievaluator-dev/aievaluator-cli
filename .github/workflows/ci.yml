@@ -107,10 +107,12 @@ jobs:
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
-      - run: npm ci
-      - run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Build and publish
+        run: |
+          npm config set //registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}
+          npm ci
+          npm run build
+          npm publish --access public
 
   publish-dotnet:
     if: startsWith(github.ref, 'refs/tags/dotnet-v')
