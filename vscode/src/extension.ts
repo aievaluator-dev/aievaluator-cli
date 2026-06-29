@@ -26,6 +26,8 @@ class EvalHistoryItem {
     public passed: boolean,
     public timestamp: Date,
     public evaluationId: string,
+    public response?: string,
+    public expected?: string,
   ) {}
 }
 
@@ -36,6 +38,7 @@ let extContext: vscode.ExtensionContext | undefined;
 export function activate(context: vscode.ExtensionContext) {
   extContext = context;
   history = (context.workspaceState.get<EvalHistoryItem[]>('aievaluator.history') || []);
+  inlineCustomEvaluators = (context.workspaceState.get<CustomEvalDef[]>('aievaluator.customEvaluators') || []);
 
   sidebarProvider = new SidebarProvider(context.extensionUri, context);
   context.subscriptions.push(
@@ -72,15 +75,32 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('aievaluator.evaluateFile', async () => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor) await evaluateDataset(editor.document);
+      // Find all dataset files in workspace
+      const datasets = findDatasetFiles();
+      if (datasets.length === 0) {
+        vscode.window.showWarningMessage('AI Evaluator: No .json or .jsonl files found. Run Init to create examples.');
+        return;
+      }
+      // Show QuickPick with all dataset files
+      const pick = await vscode.window.showQuickPick(
+        datasets.map(d => ({
+          label: d.name,
+          description: d.folder,
+          detail: d.path,
+        })),
+        { placeHolder: 'Select a dataset to evaluate', title: 'AI Evaluator — Datasets' }
+      );
+      if (pick) {
+        const fileDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(pick.detail));
+        await evaluateDataset(fileDoc);
+      }
     })
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('aievaluator.setAPIKey', async () => {
       const key = await vscode.window.showInputBox({
-        prompt: 'Enter your AI Evaluator API key',
+        prompt: 'Enter your AI Evaluator API key (from aievaluator.dev)',
         placeHolder: 'sk-...',
         password: true,
         ignoreFocusOut: true,
@@ -100,11 +120,20 @@ export function activate(context: vscode.ExtensionContext) {
       });
       if (!name) return;
 
-      const prompt = await vscode.window.showInputBox({
-        prompt: 'Evaluation prompt (what should the judge check?)',
-        placeHolder: 'Is the response polite and professional? Answer YES/NO.',
-      });
-      if (!prompt) return;
+      // Webview panel with textarea + optional save-to-file
+      const result = await showCustomEvalPromptPanel(name);
+      if (!result) return;
+
+      // Save prompt to file if requested
+      if (result.saveToFile && result.fileName) {
+        const folders = vscode.workspace.workspaceFolders;
+        if (folders) {
+          const filePath = path.join(folders[0].uri.fsPath, 'evals', result.fileName);
+          const evalsDir = path.dirname(filePath);
+          if (!fs.existsSync(evalsDir)) fs.mkdirSync(evalsDir, { recursive: true });
+          fs.writeFileSync(filePath, `# ${name}\n# Custom evaluator prompt\n\n${result.prompt}\n`, 'utf-8');
+        }
+      }
 
       const thresholdStr = await vscode.window.showInputBox({
         prompt: 'Threshold (0.0-1.0)',
@@ -114,7 +143,8 @@ export function activate(context: vscode.ExtensionContext) {
       if (!thresholdStr || isNaN(parseFloat(thresholdStr))) return;
       const threshold = parseFloat(thresholdStr);
 
-      inlineCustomEvaluators.push({ name, prompt, threshold });
+      inlineCustomEvaluators.push({ name: name, prompt: result.prompt, threshold });
+      context.workspaceState.update('aievaluator.customEvaluators', inlineCustomEvaluators);
       vscode.window.showInformationMessage(
         `AI Evaluator: Custom evaluator "${name}" added.`,
       );
@@ -150,12 +180,44 @@ export function activate(context: vscode.ExtensionContext) {
       const evalsDir = path.join(cwd, 'evals');
       if (!fs.existsSync(evalsDir)) fs.mkdirSync(evalsDir);
       const smokePath = path.join(evalsDir, 'smoke-test.json');
+      const orderQuestions = [
+        { input: 'What is the status of my order #ORD-2026-4831?', expected_output: 'It is in transit and will arrive in 3-5 business days.' },
+        { input: 'How can I cancel my subscription?', expected_output: 'You can cancel within 30 days by emailing support.' },
+        { input: 'What payment methods do you accept?', expected_output: 'Credit card, debit card, PayPal, and bank transfer.' },
+        { input: 'I did not receive my refund, how long does it take?', expected_output: 'Refunds are processed in 5-10 business days.' },
+        { input: 'How do I add an additional user to my account?', expected_output: 'Go to Settings > Team > Add member.' },
+      ];
       if (!fs.existsSync(smokePath)) {
-        fs.writeFileSync(smokePath, JSON.stringify([
-          { input: 'What is 2+2?', expected_output: '4' },
-          { input: 'What is the capital of France?', expected_output: 'Paris' },
-          { input: 'Say hello in Spanish', expected_output: 'Hola' },
-        ], null, 2) + '\n');
+        fs.writeFileSync(smokePath, JSON.stringify(orderQuestions, null, 2) + '\n');
+      }
+      const smokeJsonlPath = path.join(evalsDir, 'smoke-test.jsonl');
+      if (!fs.existsSync(smokeJsonlPath)) {
+        fs.writeFileSync(smokeJsonlPath, orderQuestions.map(r => JSON.stringify(r)).join('\n') + '\n');
+      }
+      // RAG dataset with context field
+      const ragPath = path.join(evalsDir, 'smoke-test-rag.json');
+      // Results output directory
+      const resultsDir = path.join(cwd, 'results');
+      if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir);
+      if (!fs.existsSync(ragPath)) {
+        const ragQuestions = [
+          {
+            input: 'Can I cancel my order?',
+            expected_output: 'Yes, you can cancel within 30 days of purchase by emailing support@example.com.',
+            context: 'Cancellation policy: customers can cancel their order within 30 days of purchase. They must email support@example.com with their order number. Refunds are processed in 5-10 business days.'
+          },
+          {
+            input: 'How long does premium shipping take?',
+            expected_output: 'Premium shipping takes 1-2 business days.',
+            context: 'Shipping options: standard (5-7 business days, free), express (3-5 business days, $9.99), premium (1-2 business days, $19.99). All shipments include a tracking number.'
+          },
+          {
+            input: 'How do I reset my password?',
+            expected_output: 'Go to the login page and click "Forgot my password". You will receive a reset link by email.',
+            context: 'Password reset: users can reset their password from the login page by clicking "Forgot my password". They will receive a reset link at their registered email. The link expires in 1 hour. If they do not receive the email, they should contact support.'
+          },
+        ];
+        fs.writeFileSync(ragPath, JSON.stringify(ragQuestions, null, 2) + '\n');
       }
       const gitignorePath = path.join(cwd, '.gitignore');
       const entry = 'aievaluator.config.json';
@@ -171,6 +233,93 @@ export function activate(context: vscode.ExtensionContext) {
       });
     })
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  Custom evaluator prompt panel (textarea + save-to-file option)
+// ═══════════════════════════════════════════════════════════════════
+
+async function showCustomEvalPromptPanel(name: string): Promise<{ prompt: string; saveToFile: boolean; fileName?: string } | undefined> {
+  const panel = vscode.window.createWebviewPanel(
+    'customEvalPrompt',
+    `Custom Evaluator: ${name}`,
+    vscode.ViewColumn.One,
+    { enableScripts: true, retainContextWhenHidden: true }
+  );
+
+  panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{padding:20px;font-family:var(--vscode-font-family);font-size:13px;color:var(--vscode-foreground);background:var(--vscode-editor-background)}
+  h3{margin-bottom:8px;font-size:14px}
+  .hint{font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:12px}
+  textarea{width:100%;height:200px;padding:10px;font-family:var(--vscode-editor-font-family);font-size:13px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border);border-radius:3px;resize:vertical;line-height:1.5}
+  textarea:focus{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+  label.check{display:flex;align-items:center;gap:6px;margin:12px 0 6px;font-size:12px;cursor:pointer}
+  input[type="checkbox"]{accent-color:var(--vscode-focusBorder)}
+  input[type="text"]{width:100%;padding:6px 10px;font-size:12px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border);border-radius:3px}
+  input[type="text"]:focus{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+  .save-row{margin-bottom:16px}
+  .actions{display:flex;gap:8px;margin-top:16px}
+  button{padding:8px 20px;border:none;border-radius:3px;cursor:pointer;font-size:13px;font-weight:500}
+  button.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground);flex:1}
+  button.primary:hover{background:var(--vscode-button-hoverBackground)}
+  button.cancel{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+  button.cancel:hover{background:var(--vscode-button-secondaryHoverBackground)}
+</style>
+</head>
+<body>
+  <h3>Evaluation Prompt</h3>
+  <p class="hint">Describe what the judge should evaluate. Be specific — this prompt is sent to the LLM judge.</p>
+  <textarea id="prompt" placeholder="Is the response polite and professional? Answer YES/NO and explain why."></textarea>
+
+  <label class="check">
+    <input type="checkbox" id="saveCb" onchange="toggleSave()">
+    <span>Save prompt as file</span>
+  </label>
+  <div class="save-row" id="saveRow" style="display:none">
+    <input type="text" id="fileName" value="${escapeHtml(name)}-custom_eval.md" placeholder="filename.md">
+    <span class="hint" style="display:block;margin-top:4px">Saved to evals/ folder in workspace.</span>
+  </div>
+
+  <div class="actions">
+    <button class="primary" onclick="submit()">✓ Save Evaluator</button>
+    <button class="cancel" onclick="cancel()">Cancel</button>
+  </div>
+
+  <script>
+    const v = acquireVsCodeApi();
+    function toggleSave() {
+      document.getElementById('saveRow').style.display = document.getElementById('saveCb').checked ? 'block' : 'none';
+    }
+    function submit() {
+      const prompt = document.getElementById('prompt').value.trim();
+      if (!prompt) return;
+      const saveToFile = document.getElementById('saveCb').checked;
+      const fileName = saveToFile ? document.getElementById('fileName').value.trim() : undefined;
+      v.postMessage({ command: 'submit', prompt, saveToFile, fileName });
+    }
+    function cancel() { v.postMessage({ command: 'cancel' }); }
+  </script>
+</body>
+</html>`;
+
+  return new Promise((resolve) => {
+    panel.webview.onDidReceiveMessage((msg) => {
+      if (msg.command === 'submit') {
+        resolve({ prompt: msg.prompt, saveToFile: msg.saveToFile, fileName: msg.fileName || undefined });
+        panel.dispose();
+      } else if (msg.command === 'cancel') {
+        resolve(undefined);
+        panel.dispose();
+      }
+    });
+    panel.onDidDispose(() => resolve(undefined));
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -199,6 +348,13 @@ async function pickEvalOptions(query: string, hasApiKey: boolean): Promise<{
       prompt: 'Enter your agent endpoint URL',
       placeHolder: 'https://my-agent.com/chat',
       value: vscode.workspace.getConfiguration('aievaluator').get<string>('defaultAgent') || '',
+      validateInput: (value) => {
+        if (!value) return 'URL is required';
+        if (value.includes('localhost') || value.includes('127.0.0.1') || value.includes('0.0.0.0')) {
+          return '⚠ Local URLs are not reachable from the cloud engine. Use a public URL or tunnel (e.g. ngrok).';
+        }
+        return null;
+      },
     }) || '/chat';
   }
 
@@ -212,13 +368,13 @@ async function pickEvalOptions(query: string, hasApiKey: boolean): Promise<{
       metricId: m.id,
       defaultThreshold: m.threshold,
     })),
-    ...inlineCustomEvaluators.map(ce => ({
+    ...(hasApiKey ? inlineCustomEvaluators.map(ce => ({
       label: `🔧 ${ce.name}`,
       description: ce.prompt.substring(0, 60),
       picked: false,
       metricId: ce.name,
       defaultThreshold: ce.threshold,
-    })),
+    })) : []),
   ];
 
   const qp = vscode.window.createQuickPick();
@@ -372,8 +528,14 @@ async function evaluateSelection() {
           const body: Record<string, unknown> = {
             rows: [{ input: selection, expected_output: opts.expected || undefined }],
             agent: { url: opts.agent, format: 'openai' },
-            metrics: opts.metrics.map(m => m.name),
+            metrics: opts.metrics.filter(m => !inlineCustomEvaluators.some(ce => ce.name === m.name)).map(m => m.name),
             thresholds: Object.fromEntries(opts.metrics.map(m => [m.name, m.threshold])),
+            custom_evaluators: opts.metrics
+              .filter(m => inlineCustomEvaluators.some(ce => ce.name === m.name))
+              .map(m => {
+                const ce = inlineCustomEvaluators.find(c => c.name === m.name)!;
+                return { name: ce.name, prompt: ce.prompt };
+              }),
           };
           const result = await httpRequest(`${ENGINE_URL}/api/v1/evaluations/sync`, {
             method: 'POST',
@@ -386,7 +548,7 @@ async function evaluateSelection() {
             .map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`)
             .join(' · ');
           const passIcon = data.results?.[0]?.passed ? '✅' : '❌';
-          addToHistory(selection, scores as Record<string, number>, data.results?.[0]?.passed, data.evaluation_id || '');
+          addToHistory(selection, scores as Record<string, number>, data.results?.[0]?.passed, data.evaluation_id || '', data.results?.[0]?.agent_response, opts.expected);
           sidebarProvider?.refresh(history);
           vscode.window.showInformationMessage(`AI Evaluator: ${scoreList} ${passIcon}`);
         } else {
@@ -408,15 +570,17 @@ async function evaluateSelection() {
               .map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`)
               .join(' · ');
             const passIcon = evalResult.passed ? '✅' : '❌';
-            addToHistory(selection, scores as Record<string, number>, evalResult.passed, data.evaluation_id || '');
+            addToHistory(selection, scores as Record<string, number>, evalResult.passed, data.evaluation_id || '', evalResult.agent_response, opts.expected);
             sidebarProvider?.refresh(history);
             vscode.window.showInformationMessage(`AI Evaluator: ${scoreList} ${passIcon}`);
           }
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Unknown error';
-        if (msg.includes('429')) {
-          vscode.window.showWarningMessage('AI Evaluator: Daily limit reached. Sign up for 100 free evals/month.');
+        const msg = formatApiError(e);
+        if (msg.toLowerCase().includes('daily limit') || msg.toLowerCase().includes('429')) {
+          vscode.window.showWarningMessage(`AI Evaluator: ${msg}`, 'Get API Key').then(action => {
+            if (action === 'Get API Key') vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev/login'));
+          });
         } else {
           vscode.window.showErrorMessage(`AI Evaluator: ${msg}`);
         }
@@ -432,20 +596,19 @@ async function evaluateSelection() {
 async function evaluateDataset(document: vscode.TextDocument) {
   let rows: object[];
   try { rows = parseDatasetFile(document.uri.fsPath); } catch {
-    vscode.window.showErrorMessage('AI Evaluator: Invalid JSON/JSONL in file');
+    vscode.window.showErrorMessage(
+      `AI Evaluator: Could not parse ${document.fileName.split('/').pop()}. Make sure it's valid JSON (array of {input, expected_output?}) or JSONL.`,
+      'Init example dataset',
+    ).then(action => {
+      if (action === 'Init example dataset') vscode.commands.executeCommand('aievaluator.init');
+    });
     return;
   }
 
   const count = rows.length;
-  const proceed = await vscode.window.showInformationMessage(
-    `Evaluate ${count} quer${count === 1 ? 'y' : 'ies'} from ${document.fileName.split('/').pop()}?`,
-    { modal: false },
-    'Evaluate',
-  );
-  if (proceed !== 'Evaluate') return;
 
   const apiKey: string | undefined = await extContext?.secrets.get('aievaluator.apiKey');
-  const opts = await pickEvalOptions(`Dataset: ${count} rows`, !!apiKey);
+  const opts = await pickEvalOptions(`${document.fileName.split('/').pop()}: ${count} quer${count === 1 ? 'y' : 'ies'}`, !!apiKey);
   if (!opts) return;
 
   await vscode.window.withProgress(
@@ -456,8 +619,14 @@ async function evaluateDataset(document: vscode.TextDocument) {
           const body: Record<string, unknown> = {
             rows,
             agent: { url: opts.agent, format: 'openai' },
-            metrics: opts.metrics.map(m => m.name),
+            metrics: opts.metrics.filter(m => !inlineCustomEvaluators.some(ce => ce.name === m.name)).map(m => m.name),
             thresholds: Object.fromEntries(opts.metrics.map(m => [m.name, m.threshold])),
+            custom_evaluators: opts.metrics
+              .filter(m => inlineCustomEvaluators.some(ce => ce.name === m.name))
+              .map(m => {
+                const ce = inlineCustomEvaluators.find(c => c.name === m.name)!;
+                return { name: ce.name, prompt: ce.prompt };
+              }),
           };
           const result = await httpRequest(`${ENGINE_URL}/api/v1/evaluations/sync`, {
             method: 'POST',
@@ -465,14 +634,7 @@ async function evaluateDataset(document: vscode.TextDocument) {
             body: JSON.stringify(body),
           });
           const data = JSON.parse(result);
-          const score = data.overall_score || 0;
-          const allPassed = (data.results || []).every((r: { passed: boolean }) => r.passed);
-          const output = JSON.stringify(data, null, 2);
-          const outDoc = await vscode.workspace.openTextDocument({ content: output, language: 'json' });
-          await vscode.window.showTextDocument(outDoc, { preview: false });
-          vscode.window.showInformationMessage(
-            `AI Evaluator: ${(score * 100).toFixed(0)}% overall · ${count} rows ${allPassed ? '✅' : '❌'}`,
-          );
+          showResultsPanel(document.fileName.split('/').pop() || 'dataset', data);
         } else {
           const result = await httpRequest(`${ENGINE_URL}/api/v1/playground/evaluate`, {
             method: 'POST',
@@ -480,25 +642,227 @@ async function evaluateDataset(document: vscode.TextDocument) {
             body: JSON.stringify({ rows, agent_endpoint: opts.agent, metrics: opts.metrics }),
           });
           const data = JSON.parse(result);
-          const score = data.overall_score || 0;
-          const allPassed = (data.results || []).every((r: { passed: boolean }) => r.passed);
-          const output = JSON.stringify(data, null, 2);
-          const outDoc = await vscode.workspace.openTextDocument({ content: output, language: 'json' });
-          await vscode.window.showTextDocument(outDoc, { preview: false });
-          vscode.window.showInformationMessage(
-            `AI Evaluator: ${(score * 100).toFixed(0)}% overall · ${count} rows ${allPassed ? '✅' : '❌'}`,
-          );
+          showResultsPanel(document.fileName.split('/').pop() || 'dataset', data);
         }
       } catch (e) {
-        vscode.window.showErrorMessage(`AI Evaluator: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        const msg = formatApiError(e);
+        if (msg.toLowerCase().includes('daily limit') || msg.toLowerCase().includes('429')) {
+          vscode.window.showWarningMessage(`AI Evaluator: ${msg}`, 'Get API Key').then(action => {
+            if (action === 'Get API Key') vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev/login'));
+          });
+        } else {
+          vscode.window.showErrorMessage(`AI Evaluator: ${msg}`);
+        }
       }
     }
   );
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Helpers
+//  Results panel (dataset evaluation results)
 // ═══════════════════════════════════════════════════════════════════
+
+function showResultsPanel(fileName: string, data: Record<string, unknown>) {
+  const results = (data.results || []) as Array<Record<string, unknown>>;
+  const overallScore = (data.overall_score as number) || 0;
+  const allPassed = results.every((r: Record<string, unknown>) => r.passed as boolean);
+
+  // Add to history
+  for (const r of results) {
+    addToHistory(r.query as string, (r.scores || {}) as Record<string, number>, r.passed as boolean, data.evaluation_id as string || '', r.agent_response as string);
+  }
+  sidebarProvider?.refresh(history);
+
+  const rowsHtml = results.map((r: Record<string, unknown>, i: number) => {
+    const scores = (r.scores || {}) as Record<string, number>;
+    const reasons = (r.reasons || {}) as Record<string, string>;
+    const response = (r.agent_response as string) || '';
+    const scoreList = Object.entries(scores).map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`).join(' · ');
+    const metricsHtml = Object.entries(scores).map(([name, score]) => {
+      return `<div class="metric-row">
+        <div class="metric-header">
+          <span class="metric-name">${escapeHtml(name)}</span>
+          <span class="metric-score" style="color:${score >= 0.7 ? 'var(--vscode-charts-green)' : 'var(--vscode-charts-red)'}">${(score * 100).toFixed(0)}%</span>
+        </div>
+        <div class="metric-reason">${escapeHtml(reasons[name] || '\u2014')}</div>
+      </div>`;
+    }).join('');
+    return `<div class="result-item ${r.passed ? 'passed' : 'failed'}" onclick="toggleRow(${i})">
+      <div class="result-summary">
+        <span class="result-icon">${r.passed ? '\u2705' : '\u274c'}</span>
+        <span class="result-query">${escapeHtml(((r.query as string) || '').length > 60 ? (r.query as string).substring(0, 60) + '...' : (r.query as string) || '')}</span>
+        <span class="result-score">${scoreList}</span>
+      </div>
+      <div class="result-detail" id="detail-${i}" style="display:none">
+        ${response ? `<div class="detail-section"><div class="detail-label">\u{1F916} Agent Response</div><div class="detail-text">${escapeHtml(response)}</div></div>` : ''}
+        <div class="detail-section"><div class="detail-label">\u{1F4CA} Metrics</div>${metricsHtml}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const panel = vscode.window.createWebviewPanel(
+    'evalResults',
+    `Results: ${fileName}`,
+    vscode.ViewColumn.One,
+    { enableScripts: true, retainContextWhenHidden: true }
+  );
+
+  const now2 = new Date();
+  const defaultFileName = `result-${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}-${String(now2.getDate()).padStart(2,'0')}-${String(now2.getHours()).padStart(2,'0')}${String(now2.getMinutes()).padStart(2,'0')}${String(now2.getSeconds()).padStart(2,'0')}.json`;
+
+  panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{padding:16px;font-family:var(--vscode-font-family);font-size:13px;color:var(--vscode-foreground);background:var(--vscode-editor-background)}
+  .header{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--vscode-widget-border)}
+  .header h2{font-size:16px;margin-bottom:4px}
+  .header .overall{font-size:24px;font-weight:700;margin-right:8px}
+  .header .overall.pass{color:var(--vscode-charts-green)}
+  .header .overall.fail{color:var(--vscode-charts-red)}
+  .header .meta{font-size:11px;color:var(--vscode-descriptionForeground)}
+  .result-item{margin:2px 0;border-radius:4px;overflow:hidden;cursor:pointer}
+  .result-item.failed{border-left:3px solid var(--vscode-charts-red)}
+  .result-item.passed{border-left:3px solid var(--vscode-charts-green)}
+  .result-summary{padding:8px 10px;display:flex;align-items:center;gap:8px;background:var(--vscode-textBlockQuote-background)}
+  .result-summary:hover{background:var(--vscode-list-hoverBackground)}
+  .result-icon{font-size:14px;flex-shrink:0}
+  .result-query{flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .result-score{font-size:11px;color:var(--vscode-descriptionForeground);white-space:nowrap}
+  .result-detail{padding:10px;background:var(--vscode-editor-background)}
+  .detail-section{margin-bottom:10px}
+  .detail-label{font-size:10px;font-weight:700;text-transform:uppercase;color:var(--vscode-descriptionForeground);margin-bottom:4px;letter-spacing:0.3px}
+  .detail-text{font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;padding:6px 8px;background:var(--vscode-textBlockQuote-background);border-radius:3px}
+  .metric-row{margin-bottom:6px}
+  .metric-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2px}
+  .metric-name{font-size:12px;font-weight:500}
+  .metric-score{font-size:13px;font-weight:700}
+  .metric-reason{font-size:11px;color:var(--vscode-descriptionForeground);line-height:1.4;margin-left:4px}
+  .actions{display:flex;gap:8px;margin-top:16px}
+  button{padding:6px 16px;border:none;border-radius:3px;cursor:pointer;font-size:12px;font-weight:500}
+  button.primary{background:var(--vscode-button-background);color:var(--vscode-button-foreground)}
+  button.primary:hover{background:var(--vscode-button-hoverBackground)}
+  button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+  button.secondary:hover{background:var(--vscode-button-secondaryHoverBackground)}
+  label.check{display:flex;align-items:center;gap:6px;margin:12px 0 6px;font-size:12px;cursor:pointer}
+  input[type="checkbox"]{accent-color:var(--vscode-focusBorder)}
+  input[type="text"]:focus{outline:1px solid var(--vscode-focusBorder);outline-offset:-1px}
+</style>
+</head>
+<body>
+  <div class="header">
+    <h2>\u{1F4CA} ${escapeHtml(fileName)}</h2>
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <span class="overall ${allPassed ? 'pass' : 'fail'}">${(overallScore * 100).toFixed(0)}%</span>
+      <span style="font-size:18px">${allPassed ? '\u2705' : '\u274c'}</span>
+    </div>
+    <div class="meta">${results.length} quer${results.length === 1 ? 'y' : 'ies'} \u00b7 ${results.filter((r: Record<string, unknown>) => r.passed).length} passed \u00b7 ${results.filter((r: Record<string, unknown>) => !r.passed).length} failed</div>
+  </div>
+
+  ${rowsHtml}
+
+  <label class="check">
+    <input type="checkbox" id="saveCb" onchange="toggleSave()">
+    <span>Save results as file</span>
+  </label>
+  <div id="saveRow" style="display:none;margin-bottom:12px">
+    <input type="text" id="fileName" value="${defaultFileName}" placeholder="result.json" style="width:100%;padding:6px 10px;font-size:12px;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border);border-radius:3px">
+    <span style="font-size:10px;color:var(--vscode-descriptionForeground);margin-top:3px;display:block">Saved to results/ folder in your workspace.</span>
+  </div>
+
+  <div class="actions">
+    <button class="primary" id="saveBtn" style="display:none" onclick="saveResult()">💾 Save</button>
+    <button class="primary" onclick="dismiss()">\u2713 Dismiss</button>
+    <button class="secondary" onclick="expandAll()">Expand All</button>
+  </div>
+
+  <script>
+    const v = acquireVsCodeApi();
+    function toggleRow(i) {
+      const el = document.getElementById('detail-' + i);
+      if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+    let allExpanded = false;
+    function expandAll() {
+      allExpanded = !allExpanded;
+      for (let i = 0; i < ${results.length}; i++) {
+        const el = document.getElementById('detail-' + i);
+        if (el) el.style.display = allExpanded ? 'block' : 'none';
+      }
+      this.textContent = allExpanded ? 'Collapse All' : 'Expand All';
+    }
+    function toggleSave() {
+      const show = document.getElementById('saveCb').checked;
+      document.getElementById('saveRow').style.display = show ? 'block' : 'none';
+      document.getElementById('saveBtn').style.display = show ? 'inline-block' : 'none';
+    }
+    function saveResult() {
+      const name = document.getElementById('fileName').value.trim();
+      if (!name) return;
+      v.postMessage({ command: 'save', fileName: name });
+    }
+    function dismiss() {
+      const save = document.getElementById('saveCb').checked;
+      const name = save ? document.getElementById('fileName').value.trim() : '';
+      v.postMessage({ command: 'dismiss', save: save, fileName: name });
+    }
+  </script>
+</body>
+</html>`;
+
+  panel.webview.onDidReceiveMessage((msg: { command: string; save?: boolean; fileName?: string }) => {
+    if (msg.command === 'save' || (msg.command === 'dismiss' && msg.save)) {
+      const fname = msg.fileName;
+      if (fname) {
+        const folders = vscode.workspace.workspaceFolders;
+        if (folders) {
+          const resultsDir = path.join(folders[0].uri.fsPath, 'results');
+          if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
+          const filePath = path.join(resultsDir, fname);
+          fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+          vscode.window.showInformationMessage(`Results saved to results/${fname}`);
+        }
+      }
+    }
+    if (msg.command === 'dismiss') {
+      panel.dispose();
+    }
+  });
+}
+
+function findDatasetFiles(): { name: string; folder: string; path: string }[] {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders) return [];
+  const results: { name: string; folder: string; path: string }[] = [];
+  for (const folder of folders) {
+    const evalsDir = path.join(folder.uri.fsPath, 'evals');
+    if (fs.existsSync(evalsDir)) {
+      const files = fs.readdirSync(evalsDir).filter(f => f.endsWith('.json') || f.endsWith('.jsonl'));
+      for (const f of files) {
+        results.push({
+          name: f,
+          folder: 'evals/',
+          path: path.join(evalsDir, f),
+        });
+      }
+    }
+    // Also check root
+    const rootFiles = fs.readdirSync(folder.uri.fsPath).filter(f => f.endsWith('.json') || f.endsWith('.jsonl'));
+    for (const f of rootFiles) {
+      if (!results.some(r => r.path === path.join(folder.uri.fsPath, f))) {
+        results.push({
+          name: f,
+          folder: './',
+          path: path.join(folder.uri.fsPath, f),
+        });
+      }
+    }
+  }
+  return results;
+}
 
 function parseDatasetFile(filePath: string): object[] {
   const raw = fs.readFileSync(filePath, 'utf-8');
@@ -509,9 +873,10 @@ function parseDatasetFile(filePath: string): object[] {
   return Array.isArray(data) ? data : [data];
 }
 
-function addToHistory(query: string, scores: Record<string, number>, passed: boolean, id: string) {
-  history.unshift(new EvalHistoryItem(query, scores, passed, new Date(), id));
+function addToHistory(query: string, scores: Record<string, number>, passed: boolean, id: string, response?: string, expected?: string) {
+  history.unshift(new EvalHistoryItem(query, scores, passed, new Date(), id, response, expected));
   if (history.length > 20) history = history.slice(0, 20);
+  extContext?.workspaceState.update('aievaluator.history', history);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -528,12 +893,24 @@ class SidebarProvider implements vscode.WebviewViewProvider {
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
     this._view = webviewView;
-    webviewView.webview.options = { enableScripts: true };
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri],
+    };
     webviewView.webview.onDidReceiveMessage(async (msg) => {
       switch (msg.command) {
         case 'evaluate': await vscode.commands.executeCommand('aievaluator.evaluateSelection'); break;
         case 'openDashboard': vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev')); break;
+        case 'openDocs': vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev/tutorials')); break;
         case 'setApiKey': await vscode.commands.executeCommand('aievaluator.setAPIKey'); break;
+        case 'initProject': await vscode.commands.executeCommand('aievaluator.init'); break;
+        case 'evaluateFile': await vscode.commands.executeCommand('aievaluator.evaluateFile'); break;
+        case 'addCustomEval': await vscode.commands.executeCommand('aievaluator.addCustomEvaluator'); this.refresh(history); break;
+        case 'deleteCustomEval':
+          inlineCustomEvaluators = inlineCustomEvaluators.filter((_, j) => j !== msg.index);
+          this._context.workspaceState.update('aievaluator.customEvaluators', inlineCustomEvaluators);
+          this.refresh(history);
+          break;
         case 'clearHistory':
           history = [];
           this._context.workspaceState.update('aievaluator.history', history);
@@ -551,41 +928,104 @@ class SidebarProvider implements vscode.WebviewViewProvider {
 
 function getSidebarHtml(hist: EvalHistoryItem[]): string {
   const historyHtml = hist.length === 0
-    ? '<p style="color:var(--vscode-descriptionForeground);font-size:12px;">No evaluations yet. Select text and run a quick evaluation.</p>'
-    : hist.slice(0, 10).map(h => {
+    ? '<p class="hint">No evaluations yet. Run one to see results here.</p>'
+    : hist.slice(0, 10).map((h, i) => {
         const scores = Object.entries(h.scores).map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`).join(' · ');
-        return `<div style="margin:6px 0;padding:6px;background:var(--vscode-textBlockQuote-background);border-radius:4px;font-size:12px;">
-          <div style="font-weight:bold">${h.passed ? '✅' : '❌'} ${scores}</div>
-          <div style="color:var(--vscode-descriptionForeground);margin-top:2px">${escapeHtml(h.query.length > 60 ? h.query.substring(0, 60) + '...' : h.query)}</div>
-          <div style="color:var(--vscode-descriptionForeground);font-size:10px;margin-top:2px">${h.timestamp.toLocaleTimeString()}</div>
+        const hasDetails = !!(h.response || h.expected);
+        const detailHtml = hasDetails ? `
+          <div class="hist-detail" id="detail-${i}" style="display:none;margin-top:6px;padding-top:6px;border-top:1px solid var(--vscode-widget-border)">
+            ${h.response ? `<div class="detail-label">🤖 Response</div><div class="detail-text">${escapeHtml(h.response.length > 300 ? h.response.substring(0, 300) + '...' : h.response)}</div>` : ''}
+            ${h.expected ? `<div class="detail-label" style="margin-top:6px">🎯 Expected</div><div class="detail-text">${escapeHtml(h.expected.length > 300 ? h.expected.substring(0, 300) + '...' : h.expected)}</div>` : ''}
+          </div>` : '';
+        return `<div class="hist-item${hasDetails ? ' clickable' : ''}"${hasDetails ? ` onclick="toggleDetail(${i})"` : ''}>
+          <div class="hist-status">${h.passed ? '✅' : '❌'} ${scores}</div>
+          <div class="hist-query">${escapeHtml(h.query.length > 50 ? h.query.substring(0, 50) + '...' : h.query)}</div>
+          ${detailHtml}
         </div>`;
       }).join('');
 
-  return `<!DOCTYPE html><html><head><style>
-    body{padding:10px;font-family:var(--vscode-font-family);color:var(--vscode-foreground)}
-    button{width:100%;padding:7px;margin:4px 0;background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:none;cursor:pointer;border-radius:3px;font-size:12px}
-    button:hover{background:var(--vscode-button-hoverBackground)}
-    button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
-    h3{margin:0 0 8px 0;font-size:14px}
-    .hint{font-size:11px;color:var(--vscode-descriptionForeground);margin:8px 0}
-  </style></head><body>
-  <h3>🧪 AI Evaluator</h3>
-  <button onclick="runEval()">▶ Run Quick Evaluation</button>
-  <button onclick="setKey()" class="secondary">🔑 Set API Key</button>
-  <button onclick="openDashboard()" class="secondary">📊 Open Dashboard</button>
-  <div class="hint">Select text in the editor, then click Run.</div>
-  <hr style="border:0;border-top:1px solid var(--vscode-widget-border);margin:10px 0">
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <span style="font-weight:bold;font-size:12px">Recent</span>
-    ${hist.length > 0 ? '<button onclick="clearHistory()" style="width:auto;padding:2px 8px;font-size:10px" class="secondary">Clear</button>' : ''}
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src 'none'; img-src 'none'; connect-src 'none'; frame-src 'none';">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{padding:8px;font-family:var(--vscode-font-family);font-size:12px;color:var(--vscode-foreground)}
+  .section{margin-bottom:12px}
+  .section-title{font-size:11px;text-transform:uppercase;color:var(--vscode-descriptionForeground);margin-bottom:6px;letter-spacing:0.5px}
+  button{display:block;width:100%;padding:6px 10px;margin:3px 0;background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:none;border-radius:3px;cursor:pointer;font-size:12px;text-align:left}
+  button:hover{background:var(--vscode-button-hoverBackground)}
+  button.secondary{background:var(--vscode-button-secondaryBackground);color:var(--vscode-button-secondaryForeground)}
+  button.secondary:hover{background:var(--vscode-button-secondaryHoverBackground)}
+  .hint{font-size:11px;color:var(--vscode-descriptionForeground);margin:4px 0;line-height:1.4}
+  .hist-item{padding:4px 6px;margin:3px 0;background:var(--vscode-textBlockQuote-background);border-radius:3px}
+  .hist-item.clickable{cursor:pointer}
+  .hist-item.clickable:hover{background:var(--vscode-list-hoverBackground)}
+  .hist-status{font-weight:600;font-size:11px}
+  .hist-query{color:var(--vscode-descriptionForeground);font-size:10px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .detail-label{font-size:10px;font-weight:600;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:0.3px}
+  .detail-text{font-size:11px;margin-top:2px;margin-left:4px;padding:4px;background:var(--vscode-editor-background);border-radius:2px;white-space:pre-wrap;word-break:break-word;max-height:150px;overflow-y:auto;line-height:1.4}
+  .custom-eval-item{padding:4px 6px;margin:3px 0;background:var(--vscode-textBlockQuote-background);border-radius:3px}
+  hr{border:0;border-top:1px solid var(--vscode-widget-border);margin:10px 0}
+</style>
+</head>
+<body>
+  <div class="section">
+    <div class="section-title">🚀 Setup</div>
+    <button onclick="post('initProject')">📁 Init eval project</button>
+    <p class="hint">Creates config + example dataset in your workspace.</p>
   </div>
-  ${historyHtml}
-  <script>const v=acquireVsCodeApi()
-  function runEval(){v.postMessage({command:'evaluate'})}
-  function setKey(){v.postMessage({command:'setApiKey'})}
-  function openDashboard(){v.postMessage({command:'openDashboard'})}
-  function clearHistory(){v.postMessage({command:'clearHistory'})}</script>
-</body></html>`;
+
+  <div class="section">
+    <div class="section-title">📂 Evaluate</div>
+    <button onclick="post('evaluate')">▶ Quick eval (selection)</button>
+    <button class="secondary" onclick="post('evaluateFile')">📋 Evaluate dataset file…</button>
+    <p class="hint">Select text for quick eval, or pick a dataset file.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🔧 Custom Evaluators</div>
+    ${inlineCustomEvaluators.length === 0 ? '<p class="hint">Define your own evaluation criteria.</p>' : inlineCustomEvaluators.map((ce, i) => `
+      <div class="custom-eval-item">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-weight:500">${escapeHtml(ce.name)}</span>
+          <span style="cursor:pointer;font-size:14px" onclick="post('deleteCustomEval', ${i})" title="Remove">✕</span>
+        </div>
+        <div style="font-size:10px;color:var(--vscode-descriptionForeground);margin-top:2px">${escapeHtml(ce.prompt.length > 60 ? ce.prompt.substring(0, 60) + '...' : ce.prompt)}</div>
+      </div>`).join('')}
+    <button class="secondary" onclick="post('addCustomEval')" style="margin-top:4px">+ Add Custom Evaluator</button>
+    <p class="hint" style="font-size:10px;margin-top:4px">⚠ Custom evaluators require an API key to run.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🔑 Settings</div>
+    <button class="secondary" onclick="post('setApiKey')">Set API Key</button>
+    <button class="secondary" onclick="post('openDashboard')">📊 Open Dashboard</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📖 Docs</div>
+    <button class="secondary" onclick="post('openDocs')">Tutorials</button>
+  </div>
+
+  <hr>
+
+  <div class="section">
+    <div class="section-title">📋 Recent${hist.length > 0 ? ' <span style="cursor:pointer;float:right;font-weight:normal;text-transform:none" onclick="post(\'clearHistory\')">clear</span>' : ''}</div>
+    ${historyHtml}
+  </div>
+
+  <script>
+    const v = acquireVsCodeApi();
+    function post(cmd, idx) { v.postMessage({ command: cmd, index: idx }); }
+    function toggleDetail(i) {
+      const el = document.getElementById('detail-' + i);
+      if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    }
+  </script>
+</body>
+</html>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -656,6 +1096,23 @@ function httpRequest(url: string, options: { method: string; headers: Record<str
     if (options.body) req.write(options.body);
     req.end();
   });
+}
+
+function formatApiError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : 'Unknown error';
+  // Try to extract JSON from HTTP error body
+  const jsonMatch = msg.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const body = JSON.parse(jsonMatch[0]);
+      const detail = body.detail;
+      if (typeof detail === 'string') return detail;
+      if (detail?.error) return detail.error;
+      if (detail?.message) return detail.message;
+    } catch { /* not JSON, use raw */ }
+  }
+  // Clean up HTTP prefix
+  return msg.replace(/^HTTP \d+: /, '');
 }
 
 function escapeHtml(s: string): string {
