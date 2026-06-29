@@ -537,12 +537,7 @@ async function evaluateSelection() {
                 return { name: ce.name, prompt: ce.prompt };
               }),
           };
-          const result = await httpRequest(`${ENGINE_URL}/api/v1/evaluations/sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-            body: JSON.stringify(body),
-          });
-          const data = JSON.parse(result);
+          const data: Record<string, any> = await evaluateAsync(body, apiKey);
           const scores = data.results?.[0]?.scores || {};
           const scoreList = Object.entries(scores as Record<string, number>)
             .map(([k, v]) => `${k}: ${(v * 100).toFixed(0)}%`)
@@ -628,13 +623,8 @@ async function evaluateDataset(document: vscode.TextDocument) {
                 return { name: ce.name, prompt: ce.prompt };
               }),
           };
-          const result = await httpRequest(`${ENGINE_URL}/api/v1/evaluations/sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
-            body: JSON.stringify(body),
-          });
-          const data = JSON.parse(result);
-          showResultsPanel(document.fileName.split('/').pop() || 'dataset', data);
+          const resultData = await evaluateAsync(body, apiKey);
+          showResultsPanel(document.fileName.split('/').pop() || 'dataset', resultData);
         } else {
           const result = await httpRequest(`${ENGINE_URL}/api/v1/playground/evaluate`, {
             method: 'POST',
@@ -1075,6 +1065,49 @@ jobs:
 // ═══════════════════════════════════════════════════════════════════
 //  HTTP helper
 // ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
+//  HTTP helpers
+// ═══════════════════════════════════════════════════════════════════
+
+async function evaluateAsync(body: Record<string, unknown>, apiKey: string): Promise<Record<string, unknown>> {
+  const startResult = await httpRequest(`${ENGINE_URL}/api/v1/evaluations/async`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+    body: JSON.stringify(body),
+  });
+  const { definition_id, run_id } = JSON.parse(startResult);
+
+  return vscode.window.withProgress({
+    location: vscode.ProgressLocation.Notification,
+    title: 'Evaluating...',
+    cancellable: false,
+  }, async (progress) => {
+    for (let i = 0; i < 60; i++) {
+      await sleep(2000);
+      const statusResult = await httpRequest(`${ENGINE_URL}/api/v1/evaluations/${definition_id}/status`, {
+        method: 'GET',
+        headers: { 'X-API-Key': apiKey },
+      });
+      const status = JSON.parse(statusResult);
+      if (status.overall_score !== null && status.overall_score !== undefined) {
+        progress.report({ message: `Score: ${(status.overall_score * 100).toFixed(0)}%` });
+      }
+      if (status.status === 'completed' || status.status === 'failed') {
+        const resultsResult = await httpRequest(
+          `${ENGINE_URL}/api/v1/evaluations/${definition_id}/results?run_id=${run_id}`,
+          { method: 'GET', headers: { 'X-API-Key': apiKey } },
+        );
+        return JSON.parse(resultsResult);
+      }
+    }
+    throw new Error('Evaluation timed out after 2 minutes');
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function httpRequest(url: string, options: { method: string; headers: Record<string, string>; body?: string }): Promise<string> {
   return new Promise((resolve, reject) => {
