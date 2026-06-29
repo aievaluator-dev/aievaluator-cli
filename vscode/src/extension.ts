@@ -174,7 +174,9 @@ export function activate(context: vscode.ExtensionContext) {
 
       const snippet = platform === 'gitlab'
         ? generateGitLabCISnippet(dataset)
-        : generateCISnippet(dataset);
+        : platform === 'kubernetes'
+          ? generateKubernetesCISnippet(dataset)
+          : generateCISnippet(dataset);
       const doc = await vscode.workspace.openTextDocument({ content: snippet, language: 'yaml' });
       await vscode.window.showTextDocument(doc);
     })
@@ -1012,6 +1014,7 @@ function getSidebarHtml(hist: EvalHistoryItem[]): string {
     <div class="section-title">🚀 CI/CD</div>
     <button class="secondary" onclick="post('generateWorkflow', 'github')">🐙 GitHub Actions</button>
     <button class="secondary" onclick="post('generateWorkflow', 'gitlab')">🦊 GitLab CI</button>
+    <button class="secondary" onclick="post('generateWorkflow', 'kubernetes')">☸️ Kubernetes Job</button>
     <p class="hint">Generate a quality gate workflow for your pipeline.</p>
   </div>
 
@@ -1111,6 +1114,52 @@ ai-quality-gate:
     when: always
   rules:
     - if: \$CI_PIPELINE_SOURCE == "merge_request_event"`;
+}
+
+function generateKubernetesCISnippet(dataset: string): string {
+  return `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-evaluator-quality-gate
+  labels:
+    app: ai-evaluator
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      containers:
+      - name: evaluator
+        image: python:3.12
+        command:
+        - sh
+        - -c
+        - |
+          pip install aievaluator
+          aievaluator eval \\
+            --agent \${STAGING_AGENT_URL} \\
+            --dataset /data/${dataset} \\
+            --metrics faithfulness,g_eval \\
+            --min-score 0.80 \\
+            --ci \\
+            --format junit > /data/report.xml
+          cat /data/report.xml
+        env:
+        - name: AIEVALUATOR_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aievaluator-secrets
+              key: api-key
+        - name: STAGING_AGENT_URL
+          value: "http://agent-service.default.svc.cluster.local/chat"
+        volumeMounts:
+        - name: datasets
+          mountPath: /data
+      volumes:
+      - name: datasets
+        configMap:
+          name: eval-datasets
+      restartPolicy: Never
+  backoffLimit: 1`;
 }
 
 // ═══════════════════════════════════════════════════════════════════

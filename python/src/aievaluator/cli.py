@@ -525,7 +525,7 @@ def init():
 
 
 @main.command("generate-ci")
-@click.option("--platform", type=click.Choice(["github", "gitlab"]), default="github", help="CI/CD platform")
+@click.option("--platform", type=click.Choice(["github", "gitlab", "kubernetes"]), default="github", help="CI/CD platform")
 @click.option("--dataset", default="./evals/regression.json", help="Dataset file path")
 @click.option("--output", "output_file", default=None, help="Output file (default: stdout)")
 def generate_ci(platform, dataset, output_file):
@@ -552,6 +552,51 @@ ai-quality-gate:
     when: always
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+"""
+    elif platform == "kubernetes":
+        snippet = f"""apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-evaluator-quality-gate
+  labels:
+    app: ai-evaluator
+spec:
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      containers:
+      - name: evaluator
+        image: python:3.12
+        command:
+        - sh
+        - -c
+        - |
+          pip install aievaluator
+          aievaluator eval \\
+            --agent ${{STAGING_AGENT_URL}} \\
+            --dataset /data/{dataset} \\
+            --metrics faithfulness,g_eval \\
+            --min-score 0.80 \\
+            --ci \\
+            --format junit > /data/report.xml
+          cat /data/report.xml
+        env:
+        - name: AIEVALUATOR_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aievaluator-secrets
+              key: api-key
+        - name: STAGING_AGENT_URL
+          value: "http://agent-service.default.svc.cluster.local/chat"
+        volumeMounts:
+        - name: datasets
+          mountPath: /data
+      volumes:
+      - name: datasets
+        configMap:
+          name: eval-datasets
+      restartPolicy: Never
+  backoffLimit: 1
 """
     else:
         snippet = f"""# GitHub Actions — AI Quality Gate
