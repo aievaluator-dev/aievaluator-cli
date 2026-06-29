@@ -1,4 +1,5 @@
 .vscode-test-web/
 test-results/
 aievaluator-*.vsix
+out/
 
