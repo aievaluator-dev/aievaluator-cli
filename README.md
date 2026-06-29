@@ -101,6 +101,7 @@ The CLI is designed so you can start in 10 seconds and go as deep as you need.
 | `aievaluator whoami` | ✅ | Show your account tier and usage |
 | `aievaluator init` | — | Create evals/ folder + sample dataset + config |
 | `aievaluator eval` | ✅ | Full evaluation against your agent with quality gates |
+| `aievaluator generate-ci` | — | Generate GitHub Actions or GitLab CI workflow |
 | `aievaluator config` | — | Manage default metrics, thresholds, engine URL |
 
 ---
@@ -150,6 +151,20 @@ aievaluator eval --agent $URL --dataset ./queries.jsonl --min-score 0.80
 ---
 
 ## 🔧 CI/CD Integration
+
+### Generate a workflow (all CLIs)
+
+```bash
+# GitHub Actions
+aievaluator generate-ci --platform github
+
+# GitLab CI
+aievaluator generate-ci --platform gitlab --output .gitlab-ci.yml
+```
+
+This generates a ready-to-use quality gate workflow with the AI Evaluator CLI.
+
+### Run evals in your pipeline
 
 ```bash
 # Same command works in any CI system:

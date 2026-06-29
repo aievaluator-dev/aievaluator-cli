@@ -127,11 +127,15 @@ aievaluator config set default-metrics "faithfulness,g_eval"
 aievaluator config set default-min-score 0.80
 ```
 
-### `aievaluator login` / `whoami` / `init`
+### `aievaluator login` / `whoami` / `init` / `generate-ci`
 ```bash
 aievaluator login
 aievaluator whoami
 aievaluator init
+
+# Generate CI/CD workflow (GitHub Actions or GitLab CI)
+aievaluator generate-ci --platform github
+aievaluator generate-ci --platform gitlab --output .gitlab-ci.yml
 ```
 
 ---

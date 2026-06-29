@@ -199,6 +199,13 @@ aievaluator config set default-min-score 0.80
 aievaluator init
 ```
 
+### `aievaluator generate-ci`
+```bash
+# Generate CI/CD workflow (GitHub Actions or GitLab CI)
+aievaluator generate-ci --platform github
+aievaluator generate-ci --platform gitlab --output .gitlab-ci.yml
+```
+
 ---
 
 ## 📊 Output Formats

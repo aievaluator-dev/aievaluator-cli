@@ -291,6 +291,29 @@ aievaluator init
 # Creates aievaluator.config.json + evals/smoke-test.json + updates .gitignore
 ```
 
+### `aievaluator generate-ci`
+
+Generates a CI/CD workflow file for GitHub Actions or GitLab CI.
+
+```bash
+aievaluator generate-ci --platform github
+```
+
+Options:
+| Flag | Default | Description |
+|---|---|---|
+| `--platform github\|gitlab` | `github` | CI/CD platform |
+| `--dataset` | `./evals/regression.json` | Dataset path |
+| `--output` | stdout | Save to file |
+
+```bash
+# Print GitHub Actions workflow
+aievaluator generate-ci --platform github
+
+# Save GitLab CI workflow to file
+aievaluator generate-ci --platform gitlab --output .gitlab-ci.yml
+```
+
 ---
 
 ## 📊 Output Formats
