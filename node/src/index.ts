@@ -471,6 +471,76 @@ program
     console.log();
   });
 
+//  CI/CD snippet generator
+// ═══════════════════════════════════════════════════════════════════
+
+program.command('generate-ci')
+  .description('Generate CI/CD workflow file (GitHub Actions or GitLab CI)')
+  .option('-p, --platform <platform>', 'CI/CD platform (github or gitlab)', 'github')
+  .option('-d, --dataset <path>', 'Dataset file path', './evals/regression.json')
+  .option('-o, --output <file>', 'Output file (default: stdout)')
+  .action((options: { platform: string; dataset: string; output?: string }) => {
+    let snippet: string;
+    if (options.platform === 'gitlab') {
+      snippet = `# GitLab CI — AI Quality Gate
+ai-quality-gate:
+  stage: test
+  image: python:3.12
+  before_script:
+    - pip install aievaluator
+  script:
+    - |
+      aievaluator eval \\
+        --agent \${STAGING_AGENT_URL} \\
+        --dataset ${options.dataset} \\
+        --metrics faithfulness,g_eval \\
+        --min-score 0.80 \\
+        --ci \\
+        --format junit > report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+    when: always
+  rules:
+    - if: \$CI_PIPELINE_SOURCE == "merge_request_event"
+`;
+    } else {
+      snippet = `# GitHub Actions — AI Quality Gate
+name: AI Quality Gate
+on: [pull_request]
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install aievaluator
+      - run: |
+          aievaluator eval \\
+            --agent \${{ vars.STAGING_AGENT_URL }} \\
+            --dataset ${options.dataset} \\
+            --metrics faithfulness,g_eval \\
+            --min-score 0.80 \\
+            --ci \\
+            --format junit > report.xml
+        env:
+          AIEVALUATOR_API_KEY: \${{ secrets.AI_EVALUATOR_API_KEY }}
+      - name: Deploy
+        if: success()
+        run: ./deploy.sh
+`;
+    }
+
+    if (options.output) {
+      fs.writeFileSync(options.output, snippet);
+      console.log(`✅ Workflow written to ${options.output}`);
+    } else {
+      process.stdout.write(snippet);
+    }
+  });
+
 // ═══════════════════════════════════════════════════════════════════
 //  Exports for testing
 // ═══════════════════════════════════════════════════════════════════

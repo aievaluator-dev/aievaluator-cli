@@ -326,6 +326,84 @@ public static class CliProgram
         });
         rootCommand.AddCommand(initCmd);
 
+        // generate-ci command
+        var generateCiCmd = new Command("generate-ci", "Generate CI/CD workflow file (GitHub Actions or GitLab CI)");
+        var ciPlatformOption = new Option<string>("--platform", () => "github", "CI/CD platform (github or gitlab)");
+        var ciDatasetOption = new Option<string>("--dataset", () => "./evals/regression.json", "Dataset file path");
+        var ciOutputOption = new Option<string?>("--output", "Output file (default: stdout)");
+        generateCiCmd.AddOption(ciPlatformOption);
+        generateCiCmd.AddOption(ciDatasetOption);
+        generateCiCmd.AddOption(ciOutputOption);
+        generateCiCmd.SetHandler((string platform, string dataset, string? output) =>
+        {
+            string snippet;
+            if (platform == "gitlab")
+            {
+                snippet = $@"# GitLab CI — AI Quality Gate
+ai-quality-gate:
+  stage: test
+  image: python:3.12
+  before_script:
+    - pip install aievaluator
+  script:
+    - |
+      aievaluator eval \
+        --agent ${{STAGING_AGENT_URL}} \
+        --dataset {dataset} \
+        --metrics faithfulness,g_eval \
+        --min-score 0.80 \
+        --ci \
+        --format junit > report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+    when: always
+  rules:
+    - if: $CI_PIPELINE_SOURCE == ""merge_request_event""
+";
+            }
+            else
+            {
+                snippet = $@"# GitHub Actions — AI Quality Gate
+name: AI Quality Gate
+on: [pull_request]
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install aievaluator
+      - run: |
+          aievaluator eval \
+            --agent ${{{{ vars.STAGING_AGENT_URL }}}} \
+            --dataset {dataset} \
+            --metrics faithfulness,g_eval \
+            --min-score 0.80 \
+            --ci \
+            --format junit > report.xml
+        env:
+          AIEVALUATOR_API_KEY: ${{{{ secrets.AI_EVALUATOR_API_KEY }}}}
+      - name: Deploy
+        if: success()
+        run: ./deploy.sh
+";
+            }
+
+            if (output != null)
+            {
+                File.WriteAllText(output, snippet);
+                Console.WriteLine($"✅ Workflow written to {output}");
+            }
+            else
+            {
+                Console.Write(snippet);
+            }
+        }, ciPlatformOption, ciDatasetOption, ciOutputOption);
+        rootCommand.AddCommand(generateCiCmd);
+
         return rootCommand;
     }
 

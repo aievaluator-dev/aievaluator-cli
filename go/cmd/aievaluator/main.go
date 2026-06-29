@@ -577,6 +577,84 @@ func main() {
 	}
 	rootCmd.AddCommand(initCmd)
 
+	var generateCiCmd = &cobra.Command{
+		Use:   "generate-ci",
+		Short: "Generate CI/CD workflow file for GitHub Actions or GitLab CI",
+		Run: func(cmd *cobra.Command, args []string) {
+			platform, _ := cmd.Flags().GetString("platform")
+			dataset, _ := cmd.Flags().GetString("dataset")
+			output, _ := cmd.Flags().GetString("output")
+
+			var snippet string
+			if platform == "gitlab" {
+				snippet = fmt.Sprintf(`# GitLab CI — AI Quality Gate
+ai-quality-gate:
+  stage: test
+  image: python:3.12
+  before_script:
+    - pip install aievaluator
+  script:
+    - |
+      aievaluator eval \
+        --agent ${STAGING_AGENT_URL} \
+        --dataset %s \
+        --metrics faithfulness,g_eval \
+        --min-score 0.80 \
+        --ci \
+        --format junit > report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+    when: always
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+`, dataset)
+			} else {
+				snippet = fmt.Sprintf(`# GitHub Actions — AI Quality Gate
+name: AI Quality Gate
+on: [pull_request]
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install aievaluator
+      - run: |
+          aievaluator eval \
+            --agent ${{ vars.STAGING_AGENT_URL }} \
+            --dataset %s \
+            --metrics faithfulness,g_eval \
+            --min-score 0.80 \
+            --ci \
+            --format junit > report.xml
+        env:
+          AIEVALUATOR_API_KEY: ${{ secrets.AI_EVALUATOR_API_KEY }}
+      - name: Deploy
+        if: success()
+        run: ./deploy.sh
+`, dataset)
+			}
+
+			if output != "" {
+				err := os.WriteFile(output, []byte(snippet), 0644)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing file: %v\n", err)
+					os.Exit(1)
+				}
+				fmt.Printf("✅ Workflow written to %s\n", output)
+			} else {
+				fmt.Print(snippet)
+			}
+		},
+	}
+	generateCiCmd.Flags().StringP("platform", "p", "github", "CI/CD platform (github or gitlab)")
+	generateCiCmd.Flags().StringP("dataset", "d", "./evals/regression.json", "Dataset file path")
+	generateCiCmd.Flags().StringP("output", "o", "", "Output file (default: stdout)")
+	rootCmd.AddCommand(generateCiCmd)
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}

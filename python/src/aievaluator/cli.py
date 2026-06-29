@@ -524,6 +524,70 @@ def init():
     click.echo()
 
 
+@main.command("generate-ci")
+@click.option("--platform", type=click.Choice(["github", "gitlab"]), default="github", help="CI/CD platform")
+@click.option("--dataset", default="./evals/regression.json", help="Dataset file path")
+@click.option("--output", "output_file", default=None, help="Output file (default: stdout)")
+def generate_ci(platform, dataset, output_file):
+    """Generate a CI/CD workflow file for GitHub Actions or GitLab CI."""
+    if platform == "gitlab":
+        snippet = f"""# GitLab CI — AI Quality Gate
+ai-quality-gate:
+  stage: test
+  image: python:3.12
+  before_script:
+    - pip install aievaluator
+  script:
+    - |
+      aievaluator eval \\
+        --agent ${{STAGING_AGENT_URL}} \\
+        --dataset {dataset} \\
+        --metrics faithfulness,g_eval \\
+        --min-score 0.80 \\
+        --ci \\
+        --format junit > report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+    when: always
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+"""
+    else:
+        snippet = f"""# GitHub Actions — AI Quality Gate
+name: AI Quality Gate
+on: [pull_request]
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install aievaluator
+      - run: |
+          aievaluator eval \\
+            --agent ${{{{ vars.STAGING_AGENT_URL }}}} \\
+            --dataset {dataset} \\
+            --metrics faithfulness,g_eval \\
+            --min-score 0.80 \\
+            --ci \\
+            --format junit > report.xml
+        env:
+          AIEVALUATOR_API_KEY: ${{{{ secrets.AI_EVALUATOR_API_KEY }}}}
+      - name: Deploy
+        if: success()
+        run: ./deploy.sh
+"""
+    if output_file:
+        with open(output_file, "w") as f:
+            f.write(snippet)
+        click.echo(f"✅ Workflow written to {output_file}")
+    else:
+        click.echo(snippet)
+
+
 # ═══════════════════════════════════════════════════════════════════
 #  Entry point
 # ═══════════════════════════════════════════════════════════════════
