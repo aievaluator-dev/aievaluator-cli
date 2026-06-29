@@ -53,7 +53,7 @@ func parseDatasetFile(filePath string) ([]map[string]interface{}, error) {
 	return rows, nil
 }
 
-var version = "1.0.0"
+var version = "1.1.0"
 
 func main() {
 	var apiKeyFlag string
