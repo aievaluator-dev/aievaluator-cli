@@ -153,12 +153,24 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('aievaluator.generateCISnippet', async () => {
+      const platform = await vscode.window.showQuickPick(
+        [
+          { label: '🐙 GitHub Actions', description: '.github/workflows/ai-eval.yml', platform: 'github' },
+          { label: '🦊 GitLab CI', description: '.gitlab-ci.yml', platform: 'gitlab' },
+        ],
+        { placeHolder: 'Select CI/CD platform', title: 'AI Evaluator — Generate CI/CD Snippet' }
+      );
+      if (!platform) return;
+
       const dataset = await vscode.window.showInputBox({
         prompt: 'Path to your dataset file',
         value: './evals/regression.json',
       });
       if (!dataset) return;
-      const snippet = generateCISnippet(dataset);
+
+      const snippet = platform.platform === 'gitlab'
+        ? generateGitLabCISnippet(dataset)
+        : generateCISnippet(dataset);
       const doc = await vscode.workspace.openTextDocument({ content: snippet, language: 'yaml' });
       await vscode.window.showTextDocument(doc);
     })
@@ -1067,6 +1079,30 @@ jobs:
       - name: Deploy
         if: success()
         run: ./deploy.sh`;
+}
+
+function generateGitLabCISnippet(dataset: string): string {
+  return `# GitLab CI — AI Quality Gate
+ai-quality-gate:
+  stage: test
+  image: python:3.12
+  before_script:
+    - pip install aievaluator
+  script:
+    - |
+      aievaluator eval \\
+        --agent \${STAGING_AGENT_URL} \\
+        --dataset ${dataset} \\
+        --metrics faithfulness,g_eval \\
+        --min-score 0.80 \\
+        --ci \\
+        --format junit > report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+    when: always
+  rules:
+    - if: \$CI_PIPELINE_SOURCE == "merge_request_event"`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
