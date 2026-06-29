@@ -892,6 +892,7 @@ class SidebarProvider implements vscode.WebviewViewProvider {
         case 'evaluate': await vscode.commands.executeCommand('aievaluator.evaluateSelection'); break;
         case 'openDashboard': vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev')); break;
         case 'openDocs': vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev/tutorials')); break;
+        case 'generateCISnippet': await vscode.commands.executeCommand('aievaluator.generateCISnippet'); break;
         case 'setApiKey': await vscode.commands.executeCommand('aievaluator.setAPIKey'); break;
         case 'initProject': await vscode.commands.executeCommand('aievaluator.init'); break;
         case 'evaluateFile': await vscode.commands.executeCommand('aievaluator.evaluateFile'); break;
@@ -986,6 +987,12 @@ function getSidebarHtml(hist: EvalHistoryItem[]): string {
       </div>`).join('')}
     <button class="secondary" onclick="post('addCustomEval')" style="margin-top:4px">+ Add Custom Evaluator</button>
     <p class="hint" style="font-size:10px;margin-top:4px">⚠ Custom evaluators require an API key to run.</p>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🚀 CI/CD</div>
+    <button class="secondary" onclick="post('generateCISnippet')">Generate Workflow Snippet</button>
+    <p class="hint">1-click GitHub Actions / GitLab CI workflow.</p>
   </div>
 
   <div class="section">
