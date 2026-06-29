@@ -152,15 +152,19 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('aievaluator.generateCISnippet', async () => {
-      const platform = await vscode.window.showQuickPick(
-        [
-          { label: '🐙 GitHub Actions', description: '.github/workflows/ai-eval.yml', platform: 'github' },
-          { label: '🦊 GitLab CI', description: '.gitlab-ci.yml', platform: 'gitlab' },
-        ],
-        { placeHolder: 'Select CI/CD platform', title: 'AI Evaluator — Generate CI/CD Snippet' }
-      );
-      if (!platform) return;
+    vscode.commands.registerCommand('aievaluator.generateCISnippet', async (platformArg?: string) => {
+      let platform = platformArg;
+      if (!platform) {
+        const pick = await vscode.window.showQuickPick(
+          [
+            { label: '🐙 GitHub Actions', description: '.github/workflows/ai-eval.yml', platform: 'github' },
+            { label: '🦊 GitLab CI', description: '.gitlab-ci.yml', platform: 'gitlab' },
+          ],
+          { placeHolder: 'Select CI/CD platform', title: 'AI Evaluator — Generate CI/CD Snippet' }
+        );
+        if (!pick) return;
+        platform = pick.platform;
+      }
 
       const dataset = await vscode.window.showInputBox({
         prompt: 'Path to your dataset file',
@@ -168,7 +172,7 @@ export function activate(context: vscode.ExtensionContext) {
       });
       if (!dataset) return;
 
-      const snippet = platform.platform === 'gitlab'
+      const snippet = platform === 'gitlab'
         ? generateGitLabCISnippet(dataset)
         : generateCISnippet(dataset);
       const doc = await vscode.workspace.openTextDocument({ content: snippet, language: 'yaml' });
@@ -904,6 +908,9 @@ class SidebarProvider implements vscode.WebviewViewProvider {
         case 'evaluate': await vscode.commands.executeCommand('aievaluator.evaluateSelection'); break;
         case 'openDashboard': vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev')); break;
         case 'openDocs': vscode.env.openExternal(vscode.Uri.parse('https://www.aievaluator.dev/tutorials')); break;
+        case 'generateWorkflow':
+          await vscode.commands.executeCommand('aievaluator.generateCISnippet', msg.index);
+          break;
         case 'generateCISnippet': await vscode.commands.executeCommand('aievaluator.generateCISnippet'); break;
         case 'setApiKey': await vscode.commands.executeCommand('aievaluator.setAPIKey'); break;
         case 'initProject': await vscode.commands.executeCommand('aievaluator.init'); break;
@@ -1003,8 +1010,9 @@ function getSidebarHtml(hist: EvalHistoryItem[]): string {
 
   <div class="section">
     <div class="section-title">🚀 CI/CD</div>
-    <button class="secondary" onclick="post('generateCISnippet')">Generate Workflow Snippet</button>
-    <p class="hint">1-click GitHub Actions / GitLab CI workflow.</p>
+    <button class="secondary" onclick="post('generateWorkflow', 'github')">🐙 GitHub Actions</button>
+    <button class="secondary" onclick="post('generateWorkflow', 'gitlab')">🦊 GitLab CI</button>
+    <p class="hint">Generate a quality gate workflow for your pipeline.</p>
   </div>
 
   <div class="section">
