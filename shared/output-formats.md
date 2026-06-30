@@ -1,14 +1,14 @@
 # Output Formats — AI Evaluator CLI
 
-> Especificación de los 3 formatos de salida. Todos los clientes deben producir
-> outputs idénticos en cada formato.
+> Specification of the 3 output formats. All clients must produce
+> identical outputs in each format.
 
 ---
 
 ## 1. Table (default)
 
-Formato para terminal humana. Usa la biblioteca de tablas del lenguaje
-(rich para Python, lipgloss para Go, Spectre.Console para C#, chalk para Node).
+Human-readable terminal format. Uses each language's table library
+(rich for Python, lipgloss for Go, Spectre.Console for C#, chalk for Node).
 
 ### Header
 
@@ -27,11 +27,11 @@ Formato para terminal humana. Usa la biblioteca de tablas del lenguaje
 
 ### Rows
 
-Cada fila de resultado con:
-- Número de query
-- Query truncada a 50 chars
-- Score del primer métrico como porcentaje
-- ✅ si passed, ❌ si no
+Each result row with:
+- Query number
+- Query truncated to 50 chars
+- First metric score as percentage
+- ✅ if passed, ❌ if not
 
 ```
 │  1 │ What is 2+2?                       │  95%   │  ✅   │
@@ -50,7 +50,7 @@ Cada fila de resultado con:
 ```
 ✅ Score 87.5% meets threshold 0.80
 ```
-o
+or
 ```
 ❌ Score 72.0% below threshold 0.80
 ```
@@ -59,7 +59,7 @@ o
 
 ## 2. JSON (`--format json`)
 
-Salida limpia en stdout. Solo JSON, sin logs ni colores.
+Clean stdout output. JSON only, no logs or colors.
 
 ```json
 {
@@ -86,16 +86,16 @@ Salida limpia en stdout. Solo JSON, sin logs ni colores.
 }
 ```
 
-### Reglas
-- stdout: solo el JSON
-- stderr: warnings/errores (vacío si todo OK)
-- Exit code: 0 si `passed == true`, 1 si no
+### Rules
+- stdout: JSON only
+- stderr: warnings/errors (empty if all OK)
+- Exit code: 0 if `passed == true`, 1 otherwise
 
 ---
 
 ## 3. JUnit XML (`--format junit`)
 
-Compatible con Jenkins, GitLab CI, GitHub Actions, CircleCI.
+Compatible with Jenkins, GitLab CI, GitHub Actions, CircleCI.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -115,8 +115,8 @@ Compatible con Jenkins, GitLab CI, GitHub Actions, CircleCI.
 </testsuite>
 ```
 
-### Reglas
-- `<testsuite>`: `tests` = total queries, `failures` = queries que no pasaron
-- `<testcase>`: uno por query. `name` = "Query {N}: {truncated query}"
-- `<failure>`: solo si `passed == false`. Incluye query, expected, got, scores
-- `time` en `<testcase>` es opcional (0 si no hay latencia por query)
+### Rules
+- `<testsuite>`: `tests` = total queries, `failures` = failed queries
+- `<testcase>`: one per query. `name` = "Query {N}: {truncated query}"
+- `<failure>`: only if `passed == false`. Includes query, expected, got, scores
+- `time` in `<testcase>` is optional (0 if no per-query latency)

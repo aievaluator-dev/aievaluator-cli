@@ -1,11 +1,11 @@
 # Config Spec — AI Evaluator CLI
 
-> Especificación de configuración y resolución de API key.
-> Todos los clientes deben implementar este comportamiento.
+> Configuration and API key resolution specification.
+> All clients must implement this behavior.
 
 ---
 
-## Archivo de configuración
+## Configuration file
 
 ### Path
 
@@ -17,10 +17,10 @@
 
 ### Project-local override
 
-Si existe `./aievaluator.config.json` en el directorio actual, sus valores
-sobreescriben los del config global. Ideal para CI/CD.
+If `./aievaluator.config.json` exists in the current directory, its values
+override the global config. Ideal for CI/CD.
 
-### Esquema
+### Schema
 
 ```json
 {
@@ -31,27 +31,27 @@ sobreescriben los del config global. Ideal para CI/CD.
 }
 ```
 
-| Campo | Tipo | Default | Descripción |
+| Field | Type | Default | Description |
 |---|---|---|---|
-| `engine_url` | string | `https://api.aievaluator.dev` | Base URL del engine |
-| `api_key` | string\|null | `null` | API key (opcional en config, seteado por `login`) |
-| `default_metrics` | string | `faithfulness,g_eval` | Métricas por defecto |
-| `default_min_score` | float | `0.80` | Threshold por defecto |
+| `engine_url` | string | `https://api.aievaluator.dev` | Engine base URL |
+| `api_key` | string\|null | `null` | API key (optional in config, set by `login`) |
+| `default_metrics` | string | `faithfulness,g_eval` | Default metrics |
+| `default_min_score` | float | `0.80` | Default threshold |
 
 ---
 
-## Prioridad de resolución de API key
+## API key resolution priority
 
-El orden de prioridad, de mayor a menor:
+Priority order, highest to lowest:
 
-1. **Flag `--api-key`** — pasado directamente en la CLI
-2. **Variable de entorno `AIEVALUATOR_API_KEY`** — ideal para CI/CD
-3. **Project-local config `./aievaluator.config.json`** — `api_key` campo
-4. **Global config `~/.config/aievaluator/config.json`** — `api_key` campo
+1. **`--api-key` flag** — passed directly on the CLI
+2. **`AIEVALUATOR_API_KEY` env var** — ideal for CI/CD
+3. **Project-local config `./aievaluator.config.json`** — `api_key` field
+4. **Global config `~/.config/aievaluator/config.json`** — `api_key` field
 
-Idem para `engine_url`:
-1. Flag `--engine-url`
-2. Variable de entorno `AIEVALUATOR_ENGINE_URL`
+Same for `engine_url`:
+1. `--engine-url` flag
+2. `AIEVALUATOR_ENGINE_URL` env var
 3. Project-local config `./aievaluator.config.json` → `engine_url`
 4. Global config `~/.config/aievaluator/config.json` → `engine_url`
 5. Default: `https://api.aievaluator.dev`
@@ -60,36 +60,36 @@ Idem para `engine_url`:
 
 ## `aievaluator login`
 
-Al ejecutar `aievaluator login`:
+When running `aievaluator login`:
 
-1. Si se pasó `--api-key`, la usa directamente
-2. Si no, prompt interactivo:
+1. If `--api-key` was passed, uses it directly
+2. Otherwise, interactive prompt:
    ```
    Enter your AI Evaluator API key:
    (Get one at https://aievaluator.dev/settings)
    ```
-3. Valida la key llamando `GET /api/v1/tenants/me/usage`
-4. Si es válida, guarda en global config y muestra:
+3. Validates the key by calling `GET /api/v1/tenants/me/usage`
+4. If valid, saves to global config and displays:
    ```
    ✅ Logged in as {tenant_name} ({tier})
       Evals this cycle: {used}/{limit}
    ```
-5. Si es inválida, error y exit code 2
+5. If invalid, error and exit code 2
 
 ---
 
 ## `aievaluator whoami`
 
-1. Resuelve API key según prioridad
-2. Si no hay key: error "Not logged in. Run `aievaluator login`"
-3. Llama `GET /api/v1/tenants/me/usage`
-4. Muestra tenant info
+1. Resolves API key by priority
+2. If no key: error "Not logged in. Run `aievaluator login`"
+3. Calls `GET /api/v1/tenants/me/usage`
+4. Displays tenant info
 
 ---
 
-## Variables de entorno reconocidas
+## Recognized environment variables
 
-| Variable | Equivalente a |
+| Variable | Equivalent to |
 |---|---|
 | `AIEVALUATOR_API_KEY` | `--api-key` flag |
 | `AIEVALUATOR_ENGINE_URL` | `--engine-url` flag |
