@@ -2,7 +2,7 @@
   "name": "aievaluator",
   "displayName": "AI Evaluator",
   "description": "Evaluate your AI agents directly from VS Code — no signup required",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "publisher": "aievaluator",
   "icon": "images/icon.png",
   "engines": {
@@ -135,7 +135,10 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "package": "vsce package"
+    "package": "vsce package",
+    "screenshots": "npm run compile && npx tsx tests/screenshots-cdp.ts",
+    "screenshots:quick": "npx tsx tests/screenshots-cdp.ts",
+    "cdp:smoke": "npx tsx tests/cdp-smoke.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",

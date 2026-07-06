@@ -74,14 +74,30 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('aievaluator.evaluateFile', async () => {
-      // Find all dataset files in workspace
+    vscode.commands.registerCommand('aievaluator.evaluateFile', async (uri?: vscode.Uri) => {
+      // If triggered from context menu on a .json/.jsonl file, use that file directly
+      if (uri) {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await evaluateDataset(doc);
+        return;
+      }
+
+      // If the active editor already has a .json/.jsonl file open, use it directly
+      const editor = vscode.window.activeTextEditor;
+      if (editor) {
+        const name = editor.document.fileName;
+        if (name.endsWith('.json') || name.endsWith('.jsonl')) {
+          await evaluateDataset(editor.document);
+          return;
+        }
+      }
+
+      // Otherwise, show QuickPick to select a dataset file
       const datasets = findDatasetFiles();
       if (datasets.length === 0) {
         vscode.window.showWarningMessage('AI Evaluator: No .json or .jsonl files found. Run Init to create examples.');
         return;
       }
-      // Show QuickPick with all dataset files
       const pick = await vscode.window.showQuickPick(
         datasets.map(d => ({
           label: d.name,
