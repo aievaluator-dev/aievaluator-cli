@@ -1,0 +1,74 @@
+<idea-plugin>
+    <id>com.aievaluator.intellij</id>
+    <name>AI Evaluator</name>
+    <vendor email="support@aievaluator.dev" url="https://aievaluator.dev">AI Evaluator</vendor>
+
+    <description><![CDATA[
+        <h2>Evaluate your AI agents directly from IntelliJ IDEA</h2>
+        <p>Ship AI agents with confidence. Evaluate your LLM agents from your IDE — catch regressions,
+        set quality gates, and block bad deployments before your users see them.</p>
+
+        <h3>Features</h3>
+        <ul>
+            <li><b>Quick Eval</b> — Select text, right-click → Evaluate, get scores instantly</li>
+            <li><b>Dataset Evaluation</b> — Right-click any .json/.jsonl file and evaluate all queries</li>
+            <li><b>Sidebar Tool Window</b> — Quick access to eval, settings, history, and CI/CD snippets</li>
+            <li><b>Custom Evaluators</b> — Define your own LLM-as-a-Judge criteria</li>
+            <li><b>CI/CD Snippets</b> — One-click GitHub Actions / GitLab CI workflow</li>
+        </ul>
+
+        <p>⚡ 5 free evals/day. 100/month free with API key → <a href="https://aievaluator.dev">aievaluator.dev</a></p>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+            id="AI Evaluator"
+            anchor="right"
+            icon="AIEvaluatorIcons.Default"
+            factoryClass="com.aievaluator.intellij.toolwindow.AIEvaluatorToolWindowFactory" />
+    </extensions>
+
+    <actions>
+        <action
+            id="AIEvaluator.EvaluateSelection"
+            class="com.aievaluator.intellij.actions.EvaluateSelectionAction"
+            text="AI Evaluator: Evaluate selection"
+            description="Evaluate the selected text with AI Evaluator">
+            <add-to-group group-id="EditorPopupMenu" anchor="last" />
+        </action>
+
+        <action
+            id="AIEvaluator.EvaluateDataset"
+            class="com.aievaluator.intellij.actions.EvaluateDatasetAction"
+            text="AI Evaluator: Evaluate this dataset"
+            description="Evaluate a JSON/JSONL dataset file">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last" />
+        </action>
+
+        <action
+            id="AIEvaluator.InitProject"
+            class="com.aievaluator.intellij.actions.InitProjectAction"
+            text="AI Evaluator: Initialize Eval Project"
+            description="Create evals/ folder + sample dataset + config">
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+        </action>
+
+        <action
+            id="AIEvaluator.SetApiKey"
+            class="com.aievaluator.intellij.actions.SetApiKeyAction"
+            text="AI Evaluator: Set API Key"
+            description="Save your AI Evaluator API key">
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+        </action>
+
+        <action
+            id="AIEvaluator.GenerateCISnippet"
+            class="com.aievaluator.intellij.actions.GenerateCISnippetAction"
+            text="AI Evaluator: Generate CI/CD Snippet"
+            description="Copy GitHub Actions / GitLab CI workflow to clipboard">
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+        </action>
+    </actions>
+</idea-plugin>

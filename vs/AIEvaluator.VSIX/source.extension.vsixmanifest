@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+  <Metadata>
+    <Identity Id="aievaluator.aievaluator-vs" Version="1.0.0" Language="en-US" Publisher="aievaluator" />
+    <DisplayName>AI Evaluator</DisplayName>
+    <Description>Evaluate your AI agents directly from Visual Studio — catch regressions, set quality gates, and block bad deployments before your users see them.</Description>
+    <Tags>ai;evaluation;llm;agent;testing;quality;gate;rag</Tags>
+    <Categories>Testing;AI</Categories>
+    <Icon>Resources\icon.png</Icon>
+    <PreviewImage>Resources\aievaluatorlogo.webp</PreviewImage>
+    <License>Resources\LICENSE.txt</License>
+    <MoreInfo>https://aievaluator.dev</MoreInfo>
+    <GettingStartedGuide>https://aievaluator.dev/tutorials</GettingStartedGuide>
+    <ReleaseNotes>1.0.0 — Initial release: evaluate selection, datasets, custom evaluators, CI/CD snippets.</ReleaseNotes>
+  </Metadata>
+
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Enterprise" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+    <InstallationTarget Id="Microsoft.VisualStudio.Professional" Version="[17.0, 18.0)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.0,)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.VsPackage" Path="AIEvaluator.VSIX.pkgdef" />
+  </Assets>
+</PackageManifest>

@@ -1,0 +1,11 @@
+obj/
+bin/
+.vs/
+*.vsix
+*.suo
+*.user
+build/
+.gradle/
+.idea/
+*.iml
+out/
