@@ -201,6 +201,21 @@ aievaluator eval \
 
 Exit code 1 = pipeline fails = deploy blocked.
 
+**If your agent requires authentication:**
+
+```bash
+aievaluator eval \
+  --agent $STAGING_AGENT \
+  --agent-auth-type bearer \
+  --agent-auth-token $AGENT_BEARER_TOKEN \
+  --dataset ./evals/regression.json \
+  --min-score 0.80 \
+  --ci \
+  --format junit > report.xml
+```
+
+Supported auth types: `none` (default), `api_key`, `bearer`. For `api_key`, the default header is `X-API-Key`. For `bearer`, the default header is `Authorization` with `Bearer <token>` format. Override with `--agent-auth-header`.
+
 **Environment variables for CI:**
 
 ```bash
@@ -248,6 +263,10 @@ aievaluator quick --dataset ./tests.jsonl
 
 # Custom judge model
 aievaluator quick "test" --judge deepseek
+
+# With agent authentication
+aievaluator quick --dataset ./tests.json \
+  --agent-auth-type bearer --agent-auth-token "sk-abc123"
 ```
 
 ### `aievaluator eval`
@@ -255,6 +274,14 @@ aievaluator quick "test" --judge deepseek
 ```bash
 # Basic
 aievaluator eval --agent $URL --dataset ./tests.json
+
+# With agent authentication (Bearer token)
+aievaluator eval --agent $URL --dataset ./tests.json \
+  --agent-auth-type bearer --agent-auth-token "sk-abc123"
+
+# With agent authentication (API key)
+aievaluator eval --agent $URL --dataset ./tests.json \
+  --agent-auth-type api_key --agent-auth-header "X-API-Key" --agent-auth-token "my-secret"
 
 # With quality gates
 aievaluator eval --agent $URL --dataset ./tests.json \
@@ -273,6 +300,13 @@ aievaluator eval --agent $URL --dataset ./tests.json --ci --format junit
 
 # Different agent format
 aievaluator eval --agent $URL --dataset ./tests.json --agent-format claude
+
+# Agent authentication (API key or Bearer token)
+aievaluator eval --agent $URL --dataset ./tests.json \
+  --agent-auth-type bearer --agent-auth-token "sk-abc123"
+
+aievaluator eval --agent $URL --dataset ./tests.json \
+  --agent-auth-type api_key --agent-auth-header "X-API-Key" --agent-auth-token "my-key"
 ```
 
 ### `aievaluator config`
