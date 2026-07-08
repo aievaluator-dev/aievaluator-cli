@@ -363,7 +363,7 @@ async function showCustomEvalPromptPanel(name: string): Promise<{ prompt: string
 async function pickEvalOptions(query: string, hasApiKey: boolean): Promise<{
   expected: string;
   metrics: { name: string; threshold: number }[];
-  agent: string;
+  agent: { url: string; format: string; auth_type?: string; auth_header_name?: string; auth_token?: string };
   useApiKey: boolean;
 } | undefined> {
   // ── Step 1: pick agent ──
@@ -376,9 +376,13 @@ async function pickEvalOptions(query: string, hasApiKey: boolean): Promise<{
   );
   if (!agentPick) return undefined;
 
-  let agent = '/chat';
+  let agentUrl = '/chat';
+  let agentAuthType: string | undefined;
+  let agentAuthHeader: string | undefined;
+  let agentAuthToken: string | undefined;
+
   if (agentPick.agent === '__custom__') {
-    agent = await vscode.window.showInputBox({
+    agentUrl = await vscode.window.showInputBox({
       prompt: 'Enter your agent endpoint URL',
       placeHolder: 'https://my-agent.com/chat',
       value: vscode.workspace.getConfiguration('aievaluator').get<string>('defaultAgent') || '',
@@ -390,6 +394,27 @@ async function pickEvalOptions(query: string, hasApiKey: boolean): Promise<{
         return null;
       },
     }) || '/chat';
+
+    // ── Step 1b: agent auth (only for custom agents) ──
+    const authPick = await vscode.window.showQuickPick(
+      [
+        { label: '🔓 No auth', description: 'Agent is publicly accessible', authType: 'none' },
+        { label: '🔑 API Key', description: 'X-API-Key or custom header', authType: 'api_key' },
+        { label: '🎫 Bearer Token', description: 'Authorization: Bearer <token>', authType: 'bearer' },
+      ],
+      { placeHolder: 'Does the agent require authentication?', title: 'AI Evaluator — Agent Auth' }
+    );
+    if (!authPick) return undefined;
+
+    if (authPick.authType !== 'none') {
+      agentAuthType = authPick.authType;
+      agentAuthToken = await vscode.window.showInputBox({
+        prompt: `Enter the ${authPick.authType === 'bearer' ? 'Bearer token' : 'API key'}`,
+        placeHolder: authPick.authType === 'bearer' ? 'sk-...' : 'my-api-key',
+        password: true,
+        ignoreFocusOut: true,
+      }) || undefined;
+    }
   }
 
   // ── Step 2: pick metrics (PRO_METRICS when API key is set) ──
@@ -412,7 +437,7 @@ async function pickEvalOptions(query: string, hasApiKey: boolean): Promise<{
   ];
 
   const qp = vscode.window.createQuickPick();
-  qp.title = `Evaluate: "${query.substring(0, 60)}${query.length > 60 ? '...' : ''}" · Agent: ${agent.substring(0, 25)}`;
+  qp.title = `Evaluate: "${query.substring(0, 60)}${query.length > 60 ? '...' : ''}" · Agent: ${agentUrl.substring(0, 25)}${agentAuthType ? ' (' + agentAuthType + ')' : ''}`;
   qp.placeholder = 'Check the metrics you want to use';
   qp.items = metricItems;
   qp.canSelectMany = true;
@@ -434,7 +459,17 @@ async function pickEvalOptions(query: string, hasApiKey: boolean): Promise<{
   const result = await showThresholdForm(query, pickedMetrics);
   if (!result) return undefined;
 
-  return { ...result, agent, useApiKey: agent !== '/chat' };
+  const agentConfig: { url: string; format: string; auth_type?: string; auth_header_name?: string; auth_token?: string } = {
+    url: agentUrl,
+    format: 'openai',
+  };
+  if (agentAuthType && agentAuthType !== 'none' && agentAuthToken) {
+    agentConfig.auth_type = agentAuthType;
+    agentConfig.auth_token = agentAuthToken;
+    if (agentAuthHeader) agentConfig.auth_header_name = agentAuthHeader;
+  }
+
+  return { ...result, agent: agentConfig, useApiKey: agentUrl !== '/chat' };
 }
 
 async function showThresholdForm(
@@ -561,7 +596,7 @@ async function evaluateSelection() {
           // Eval endpoint (API key → all 5 metrics, any agent)
           const body: Record<string, unknown> = {
             rows: [{ input: selection, expected_output: opts.expected || undefined }],
-            agent: { url: opts.agent, format: 'openai' },
+            agent: opts.agent,
             metrics: opts.metrics.filter(m => !inlineCustomEvaluators.some(ce => ce.name === m.name)).map(m => m.name),
             thresholds: Object.fromEntries(opts.metrics.map(m => [m.name, m.threshold])),
             custom_evaluators: opts.metrics
@@ -587,7 +622,7 @@ async function evaluateSelection() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               rows: [{ input: selection, expected_output: opts.expected || undefined }],
-              agent_endpoint: opts.agent,
+              agent: opts.agent,
               metrics: opts.metrics,
             }),
           });
@@ -647,7 +682,7 @@ async function evaluateDataset(document: vscode.TextDocument) {
         if (apiKey) {
           const body: Record<string, unknown> = {
             rows,
-            agent: { url: opts.agent, format: 'openai' },
+            agent: opts.agent,
             metrics: opts.metrics.filter(m => !inlineCustomEvaluators.some(ce => ce.name === m.name)).map(m => m.name),
             thresholds: Object.fromEntries(opts.metrics.map(m => [m.name, m.threshold])),
             custom_evaluators: opts.metrics
@@ -663,7 +698,7 @@ async function evaluateDataset(document: vscode.TextDocument) {
           const result = await httpRequest(`${ENGINE_URL}/api/v1/playground/evaluate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rows, agent_endpoint: opts.agent, metrics: opts.metrics }),
+            body: JSON.stringify({ rows, agent: opts.agent, metrics: opts.metrics }),
           });
           const data = JSON.parse(result);
           showResultsPanel(document.fileName.split('/').pop() || 'dataset', data);
