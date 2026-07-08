@@ -192,12 +192,15 @@ def whoami(api_key: Optional[str]):
 @click.argument("query", required=False)
 @click.option("--dataset", "dataset_file", help="JSON dataset file", type=click.Path(exists=True), default=None)
 @click.option("--agent", "agent_url", help="Agent endpoint URL (default: internal chat agent)", default="/chat")
+@click.option("--agent-auth-type", help="Agent auth type: none, api_key, or bearer", type=click.Choice(["none", "api_key", "bearer"]), default=None)
+@click.option("--agent-auth-header", help="HTTP header name for auth (default: X-API-Key or Authorization)", default=None)
+@click.option("--agent-auth-token", help="Token or API key value", default=None)
 @click.option("--expected", help="Expected output for query", default=None)
 @click.option("--metrics", help="Metrics: faithfulness,g_eval or faithfulness:0.90,g_eval:0.75", default=None)
 @click.option("--min-score", help="Apply threshold to all metrics and enforce exit code", type=float, default=None)
 @click.option("--judge", help="LLM judge model", default=None)
 @click.option("--engine-url", help="Engine URL", default=None)
-def quick(query, dataset_file, agent_url, expected, metrics, min_score, judge, engine_url):
+def quick(query, dataset_file, agent_url, agent_auth_type, agent_auth_header, agent_auth_token, expected, metrics, min_score, judge, engine_url):
     """Quick evaluation via playground (no API key required).
 
     \b
@@ -241,10 +244,23 @@ def quick(query, dataset_file, agent_url, expected, metrics, min_score, judge, e
         else:
             rows = _parse_dataset_file(dataset_file)
 
+        # Build agent config with auth if provided
+        agent_config = None
+        if agent_auth_type and agent_auth_type != "none" and agent_auth_token:
+            agent_config = {
+                "url": agent_url,
+                "format": "openai",
+                "auth_type": agent_auth_type,
+                "auth_token": agent_auth_token,
+            }
+            if agent_auth_header:
+                agent_config["auth_header_name"] = agent_auth_header
+
         try:
             result = await client.playground_evaluate(
                 rows=rows,
-                agent_endpoint=agent_url,
+                agent_endpoint=agent_url if not agent_config else None,
+                agent_config=agent_config,
                 metrics=metrics_list,
                 judge=judge,
             )
@@ -274,6 +290,9 @@ def quick(query, dataset_file, agent_url, expected, metrics, min_score, judge, e
 @click.option("--rows", help="Inline JSON array of test cases", default=None)
 @click.option("--metrics", help="Metrics (comma-separated)", default=None)
 @click.option("--agent-format", help="Agent API format", type=click.Choice(["openai", "claude", "custom"]), default="openai")
+@click.option("--agent-auth-type", help="Agent auth type: none, api_key, or bearer", type=click.Choice(["none", "api_key", "bearer"]), default=None)
+@click.option("--agent-auth-header", help="HTTP header name for auth (default: X-API-Key or Authorization)", default=None)
+@click.option("--agent-auth-token", help="Token or API key value", default=None)
 @click.option("--min-score", help="Minimum overall score threshold (0-1)", type=float, default=None)
 @click.option("--thresholds", "thresholds_str", help="Per-metric thresholds: faithfulness:0.90,g_eval:0.75", default=None)
 @click.option("--custom", "custom_str", help="Inline custom evaluator: {\"name\":\"polite\",\"prompt\":\"Check...\",\"threshold\":0.8}", default=None)
@@ -284,7 +303,7 @@ def quick(query, dataset_file, agent_url, expected, metrics, min_score, judge, e
 @click.option("--name", "eval_name", help="Human-readable name for this evaluation", default=None)
 @click.option("--api-key", help="API key (overrides config)", default=None)
 @click.option("--engine-url", help="Engine URL", default=None)
-def eval_cmd(agent, dataset_file, rows, metrics, agent_format, min_score, thresholds_str, custom_str, output_format, ci, timeout, judge_model, eval_name, api_key, engine_url):
+def eval_cmd(agent, dataset_file, rows, metrics, agent_format, agent_auth_type, agent_auth_header, agent_auth_token, min_score, thresholds_str, custom_str, output_format, ci, timeout, judge_model, eval_name, api_key, engine_url):
     """Evaluate an AI agent against a dataset.
 
     \b
@@ -364,6 +383,9 @@ def eval_cmd(agent, dataset_file, rows, metrics, agent_format, min_score, thresh
                 rows=rows_data,
                 agent_url=agent,
                 agent_format=agent_format,
+                agent_auth_type=agent_auth_type,
+                agent_auth_header_name=agent_auth_header,
+                agent_auth_token=agent_auth_token,
                 metrics=metrics_list,
                 judge_model=judge_model,
                 name=eval_name,

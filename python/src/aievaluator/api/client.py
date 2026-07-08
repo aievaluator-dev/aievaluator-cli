@@ -78,6 +78,9 @@ class APIClient:
         rows: list[dict],
         agent_url: str,
         agent_format: str = "openai",
+        agent_auth_type: Optional[str] = None,
+        agent_auth_header_name: Optional[str] = None,
+        agent_auth_token: Optional[str] = None,
         metrics: Optional[list[str]] = None,
         judge_model: Optional[str] = None,
         name: Optional[str] = None,
@@ -85,7 +88,13 @@ class APIClient:
         thresholds: Optional[dict[str, float]] = None,
     ) -> dict:
         """POST /api/v1/evaluations/sync"""
-        agent_json = {"url": agent_url, "format": agent_format}
+        agent_json: dict = {"url": agent_url, "format": agent_format}
+        if agent_auth_type and agent_auth_type != "none":
+            agent_json["auth_type"] = agent_auth_type
+            if agent_auth_header_name:
+                agent_json["auth_header_name"] = agent_auth_header_name
+            if agent_auth_token:
+                agent_json["auth_token"] = agent_auth_token
         body = {
             "rows": rows,
             "agent": agent_json,
@@ -106,6 +115,9 @@ class APIClient:
         file_path: str,
         agent_url: str,
         agent_format: str = "openai",
+        agent_auth_type: Optional[str] = None,
+        agent_auth_header_name: Optional[str] = None,
+        agent_auth_token: Optional[str] = None,
         metrics: Optional[str] = None,
     ) -> dict:
         """POST /api/v1/evaluations/sync/upload (multipart form upload)."""
@@ -121,6 +133,12 @@ class APIClient:
                         "agent_format": agent_format,
                         "metrics": metrics or "faithfulness,g_eval",
                     }
+                    if agent_auth_type and agent_auth_type != "none":
+                        data["agent_auth_type"] = agent_auth_type
+                        if agent_auth_header_name:
+                            data["agent_auth_header_name"] = agent_auth_header_name
+                        if agent_auth_token:
+                            data["agent_auth_token"] = agent_auth_token
                     resp = await client.post(
                         url,
                         data=data,
