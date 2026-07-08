@@ -24,6 +24,8 @@ dotnet/tests/obj/
 # VS Code
 *.vsix
 .vscode-test/
+vscode/scripts/
+vscode/tests/
 
 # OS
 .DS_Store
