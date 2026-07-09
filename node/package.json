@@ -1,6 +1,6 @@
 {
   "name": "aievaluator",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "AI Evaluator CLI — evaluate your LLM agents from the command line",
   "bin": {
     "aievaluator": "./dist/cli.js"

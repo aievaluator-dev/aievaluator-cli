@@ -7,6 +7,7 @@ mod formatters {
     pub mod junit;
     pub mod table;
 }
+mod tunnel;
 
 use api::client::ApiClient;
 use api::config;
@@ -15,7 +16,7 @@ use formatters::{json, junit, table};
 use std::fs;
 use std::io::{self, Write};
 
-const VERSION: &str = "1.1.0";
+const VERSION: &str = "1.2.0";
 
 const SMOKE_TEST_DATASET: &str = r#"[
   { "input": "What is 2+2?", "expected_output": "4" },
@@ -62,6 +63,8 @@ enum Commands {
         judge: Option<String>,
         #[arg(long = "engine-url")]
         engine_url: Option<String>,
+        #[arg(long = "tunnel")]
+        tunnel: bool,
     },
     /// Evaluate an AI agent against a dataset
     Eval {
@@ -95,6 +98,8 @@ enum Commands {
         api_key: Option<String>,
         #[arg(long = "engine-url")]
         engine_url: Option<String>,
+        #[arg(long = "tunnel")]
+        tunnel: bool,
     },
     /// Manage CLI configuration
     Config {
@@ -149,7 +154,8 @@ fn run(cli: Cli) -> Result<(), i32> {
             min_score,
             judge,
             engine_url,
-        } => cmd_quick(query, dataset, agent, expected, metrics, min_score, judge, engine_url),
+            tunnel,
+        } => cmd_quick(query, dataset, agent, expected, metrics, min_score, judge, engine_url, tunnel),
         Commands::Eval {
             agent,
             dataset,
@@ -166,9 +172,10 @@ fn run(cli: Cli) -> Result<(), i32> {
             name,
             api_key,
             engine_url,
+            tunnel,
         } => cmd_eval(
             agent, dataset, rows, metrics, agent_format, min_score, thresholds, custom, format,
-            timeout, judge_model, name, api_key, engine_url,
+            timeout, judge_model, name, api_key, engine_url, tunnel,
         ),
         Commands::Config { action } => cmd_config(action),
         Commands::Init => cmd_init(),
@@ -281,11 +288,15 @@ fn cmd_quick(
     min_score: Option<f64>,
     judge: Option<String>,
     engine_url: Option<String>,
+    tunnel: bool,
 ) -> Result<(), i32> {
     if query.is_none() && dataset.is_none() {
         eprintln!("❌ Provide a query or --dataset");
         return Err(2);
     }
+
+    // ── Tunnel for local agents ──
+    let (agent, _tun) = start_tunnel_if_needed(tunnel, agent);
 
     let url = config::resolve_engine_url(engine_url.as_deref());
     let client = ApiClient::new(&url, None, 30);
@@ -370,11 +381,15 @@ fn cmd_eval(
     name: Option<String>,
     api_key: Option<String>,
     engine_url: Option<String>,
+    tunnel: bool,
 ) -> Result<(), i32> {
     if dataset.is_none() && rows_str.is_none() {
         eprintln!("❌ Provide --dataset or --rows");
         return Err(2);
     }
+
+    // ── Tunnel for local agents ──
+    let (agent, _tun) = start_tunnel_if_needed(tunnel, agent);
 
     let key = config::resolve_api_key(api_key.as_deref());
     let key = match key {
@@ -688,6 +703,42 @@ jobs:
 // ═══════════════════════════════════════════════════════════════════
 //  Helpers
 // ═══════════════════════════════════════════════════════════════════
+
+/// If --tunnel is set and agent_url is local, start a tunnel.
+/// Returns (possibly_rewritten_url, tunnel_instance).
+/// The tunnel is dropped when the returned Tunnel goes out of scope.
+fn start_tunnel_if_needed(tunnel: bool, agent_url: String) -> (String, Option<tunnel::Tunnel>) {
+    if !tunnel {
+        return (agent_url, None);
+    }
+    if !tunnel::is_local_url(&agent_url) {
+        eprintln!("Note: --tunnel is set but agent URL is not localhost. Ignoring.");
+        return (agent_url, None);
+    }
+    let port = match tunnel::extract_port(&agent_url) {
+        Some(p) => p,
+        None => {
+            eprintln!("❌ Cannot detect port in agent URL. Use format: http://localhost:<PORT>/path");
+            std::process::exit(2);
+        }
+    };
+    let mut tun = tunnel::Tunnel::new();
+    match tun.start(port) {
+        Ok(public_url) => {
+            let host = public_url
+                .replace("https://", "")
+                .replace("http://", "");
+            let mut new_url = agent_url.replace(&format!("localhost:{}", port), &host);
+            new_url = new_url.replace(&format!("127.0.0.1:{}", port), &host);
+            eprintln!("🔗 Tunnel: {}", public_url);
+            (new_url, Some(tun))
+        }
+        Err(e) => {
+            eprintln!("❌ {}", e);
+            std::process::exit(2);
+        }
+    }
+}
 
 fn parse_quick_metrics(
     metrics_str: Option<&str>,

@@ -30,6 +30,30 @@ from .config import (
     get_all_config,
 )
 from .formatters import format_table, format_json_output, format_junit
+from .tunnel import Tunnel, TunnelError, is_local_url, extract_port
+
+
+def _start_tunnel_if_needed(tunnel: bool, agent_url: str):
+    """If --tunnel is set and agent_url is local, start a tunnel.
+    Returns (possibly_rewritten_url, tunnel_instance_or_None).
+    """
+    if not tunnel:
+        return agent_url, None
+    if not is_local_url(agent_url):
+        click.echo("Note: --tunnel is set but agent URL is not localhost. Ignoring.")
+        return agent_url, None
+    port = extract_port(agent_url)
+    if port is None:
+        raise click.UsageError("Cannot detect port in agent URL. Use format: http://localhost:<PORT>/path")
+    try:
+        tun = Tunnel(port)
+        public_url = tun.start()
+        new_url = agent_url.replace(f"localhost:{port}", public_url.replace("https://", "").replace("http://", ""))
+        new_url = new_url.replace(f"127.0.0.1:{port}", public_url.replace("https://", "").replace("http://", ""))
+        click.echo(f"🔗 Tunnel: {public_url}")
+        return new_url, tun
+    except TunnelError as e:
+        raise click.UsageError(str(e))
 
 
 def _parse_dataset_file(file_path: str) -> list[dict]:
@@ -52,17 +76,6 @@ def _parse_dataset_file(file_path: str) -> list[dict]:
 def _run_async(coro):
     """Helper to run async coroutines from Click commands."""
     return asyncio.run(coro)
-
-
-def _is_local_url(url: str) -> bool:
-    """Check if a URL points to localhost or a private network."""
-    return any(x in url for x in ["localhost", "127.0.0.1", "0.0.0.0", "192.168.", "10."])
-
-
-def _extract_port(url: str) -> int | None:
-    """Extract port number from a URL like http://localhost:8047/path."""
-    m = re.search(r":(\d+)", url)
-    return int(m.group(1)) if m else None
 
 
 def _parse_quick_metrics(metrics_str: str | None, default_threshold: float | None = None) -> list | None:
@@ -212,7 +225,8 @@ def whoami(api_key: Optional[str]):
 @click.option("--min-score", help="Apply threshold to all metrics and enforce exit code", type=float, default=None)
 @click.option("--judge", help="LLM judge model", default=None)
 @click.option("--engine-url", help="Engine URL", default=None)
-def quick(query, dataset_file, agent_url, agent_auth_type, agent_auth_header, agent_auth_token, expected, metrics, min_score, judge, engine_url):
+@click.option("--tunnel", is_flag=True, help="Expose local agent via cloudflared/ngrok tunnel")
+def quick(query, dataset_file, agent_url, agent_auth_type, agent_auth_header, agent_auth_token, expected, metrics, min_score, judge, engine_url, tunnel):
     """Quick evaluation via playground (no API key required).
 
     \b
@@ -231,22 +245,7 @@ def quick(query, dataset_file, agent_url, agent_auth_type, agent_auth_header, ag
     client = APIClient(resolved_url)
 
     # ── Tunnel for local agents ──
-    if tunnel and _is_local_url(agent_url):
-        port = _extract_port(agent_url)
-        if port is None:
-            click.echo("❌ Cannot detect port in agent URL. Use format: http://localhost:<PORT>/path", err=True)
-            sys.exit(2)
-        try:
-            tun = Tunnel(port)
-            public_url = tun.start()
-            agent_url = agent_url.replace(f"localhost:{port}", public_url.replace("https://", "").replace("http://", ""))
-            agent_url = agent_url.replace(f"127.0.0.1:{port}", public_url.replace("https://", "").replace("http://", ""))
-            click.echo(f"🔗 Tunnel: {public_url}")
-        except TunnelError as e:
-            click.echo(f"❌ {e}", err=True)
-            sys.exit(2)
-    elif tunnel:
-        click.echo("Note: --tunnel is set but agent URL is not localhost. Ignoring.")
+    agent_url, tun = _start_tunnel_if_needed(tunnel, agent_url)
 
     # Parse metrics: CU1 (metric:threshold), CU2 (--min-score applies to all)
     metrics_list = _parse_quick_metrics(metrics, min_score)
@@ -310,7 +309,7 @@ def quick(query, dataset_file, agent_url, agent_auth_type, agent_auth_header, ag
     try:
         _run_async(_quick())
     finally:
-        if tunnel and 'tun' in dir():
+        if tun is not None:
             tun.stop()
 
 
@@ -364,22 +363,7 @@ def eval_cmd(agent, dataset_file, rows, metrics, agent_format, agent_auth_type, 
     client = APIClient(resolved_url, key, timeout=timeout)
 
     # ── Tunnel for local agents ──
-    if tunnel and _is_local_url(agent):
-        port = _extract_port(agent)
-        if port is None:
-            click.echo("❌ Cannot detect port in agent URL. Use format: http://localhost:<PORT>/path", err=True)
-            sys.exit(2)
-        try:
-            tun = Tunnel(port)
-            public_url = tun.start()
-            agent = agent.replace(f"localhost:{port}", public_url.replace("https://", "").replace("http://", ""))
-            agent = agent.replace(f"127.0.0.1:{port}", public_url.replace("https://", "").replace("http://", ""))
-            click.echo(f"🔗 Tunnel: {public_url}")
-        except TunnelError as e:
-            click.echo(f"❌ {e}", err=True)
-            sys.exit(2)
-    elif tunnel:
-        click.echo("Note: --tunnel is set but agent URL is not localhost. Ignoring.")
+    agent, tun = _start_tunnel_if_needed(tunnel, agent)
 
     # Resolve metrics
     if metrics:
@@ -466,7 +450,7 @@ def eval_cmd(agent, dataset_file, rows, metrics, agent_format, agent_auth_type, 
     try:
         _run_async(_eval())
     finally:
-        if tunnel and 'tun' in dir():
+        if tun is not None:
             tun.stop()
 
 

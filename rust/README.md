@@ -58,6 +58,22 @@ aievaluator generate-ci --platform kubernetes
 3. Project-local: `./aievaluator.config.json`
 4. Global: `~/.config/aievaluator/config.json`
 
+## 🌐 Evaluating local agents
+
+Use `--tunnel` to evaluate agents running on `localhost` or private networks:
+
+```bash
+aievaluator eval --agent http://localhost:8047/chat --tunnel --dataset ./tests.json
+aievaluator quick "Hello" --agent http://localhost:8047/chat --tunnel
+```
+
+The CLI auto-detects local URLs and creates a public tunnel via **cloudflared** (free, no signup),
+**ngrok**, **bore**, or **localtunnel**. The tunnel is closed automatically when the evaluation finishes.
+
+Install cloudflared: `brew install cloudflared`
+
+---
+
 ## 📄 License
 
 MIT © [AI Evaluator](https://aievaluator.dev)

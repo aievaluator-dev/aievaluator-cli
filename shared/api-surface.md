@@ -49,6 +49,7 @@ Quick evaluation without API key using the playground.
 | `--min-score` | float | No | — | Global threshold applied to all metrics |
 | `--judge` | string | No | `deepseek` | LLM judge model |
 | `--engine-url` | string | No | `https://api.aievaluator.dev` | Engine URL |
+| `--tunnel` | flag | No | false | Expose local agent via cloudflared/ngrok tunnel |
 
 **How to use `--metrics`:**
 - `faithfulness,g_eval` — metrics without threshold (uses engine defaults)
@@ -84,6 +85,7 @@ Full evaluation with API key against an agent.
 | `--name` | string | No | — | Descriptive name for this eval |
 | `--api-key` | string | No | — | API key (overrides config) |
 | `--engine-url` | string | No | — | Engine URL |
+| `--tunnel` | flag | No | false | Expose local agent via cloudflared/ngrok tunnel |
 
 **Threshold modes:**
 - `--min-score 0.80` — overall_score must be ≥ 0.80
@@ -125,6 +127,39 @@ Creates scaffolding in the current directory:
 | 1 | Score < min-score or some result failed |
 | 2 | Configuration error |
 | 3 | Network error / engine unavailable |
+
+---
+
+## Tunnel
+
+When `--tunnel` is passed, if the agent URL points to localhost or a private network,
+the CLI automatically creates a public tunnel so the cloud engine can reach the agent.
+
+### Detection
+
+URLs containing any of these are considered local:
+- `localhost`
+- `127.0.0.1`
+- `0.0.0.0`
+- `192.168.`
+- `10.`
+
+If the URL is not local, `--tunnel` prints a note and is ignored.
+
+### Providers (tried in order)
+
+| # | Binary | Command | Signup |
+|---|--------|---------|--------|
+| 1 | `cloudflared` | `tunnel --url http://localhost:{port}` | No (recommended) |
+| 2 | `ngrok` | `http {port} --log=stdout` | Yes (free tier) |
+| 3 | `bore` | `local {port} --to bore.pub` | No |
+| 4 | `lt` (localtunnel) | `--port {port}` | No |
+
+### Behavior
+
+- 15-second timeout waiting for the public URL
+- Tunnel is closed automatically after evaluation (success or failure)
+- If no tunnel tool is installed, the CLI prints install instructions and exits with code 2
 
 ---
 

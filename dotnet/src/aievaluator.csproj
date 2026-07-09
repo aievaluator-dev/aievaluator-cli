@@ -8,7 +8,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>aievaluator</ToolCommandName>
     <PackageId>aievaluator</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Title>AI Evaluator</Title>
     <Description>AI Evaluator CLI — evaluate your LLM agents from the command line</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

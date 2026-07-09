@@ -11,6 +11,7 @@ import (
 	"example.com/aievaluator/internal/api"
 	"example.com/aievaluator/internal/config"
 	"example.com/aievaluator/internal/formatters"
+	"example.com/aievaluator/internal/tunnel"
 
 	"github.com/spf13/cobra"
 )
@@ -19,6 +20,33 @@ var smokeTestDataset = []map[string]interface{}{
 	{"input": "What is 2+2?", "expected_output": "4"},
 	{"input": "What is the capital of France?", "expected_output": "Paris"},
 	{"input": "Say hello in Spanish", "expected_output": "Hola"},
+}
+
+// startTunnelIfNeeded starts a tunnel for local agents if --tunnel is set.
+func startTunnelIfNeeded(tunnelFlag bool, agentURL string) (string, *tunnel.Tunnel) {
+	if !tunnelFlag || !tunnel.IsLocalURL(agentURL) {
+		if tunnelFlag {
+			fmt.Fprintln(os.Stderr, "Note: --tunnel is set but agent URL is not localhost. Ignoring.")
+		}
+		return agentURL, nil
+	}
+	port := tunnel.ExtractPort(agentURL)
+	if port == 0 {
+		fmt.Fprintln(os.Stderr, "❌ Cannot detect port in agent URL. Use format: http://localhost:<PORT>/path")
+		os.Exit(2)
+	}
+	tun := tunnel.New()
+	publicURL, err := tun.Start(port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		os.Exit(2)
+	}
+	host := strings.TrimPrefix(publicURL, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	newURL := strings.Replace(agentURL, fmt.Sprintf("localhost:%d", port), host, 1)
+	newURL = strings.Replace(newURL, fmt.Sprintf("127.0.0.1:%d", port), host, 1)
+	fmt.Fprintf(os.Stderr, "🔗 Tunnel: %s\n", publicURL)
+	return newURL, tun
 }
 
 func parseDatasetFile(filePath string) ([]map[string]interface{}, error) {
@@ -53,7 +81,7 @@ func parseDatasetFile(filePath string) ([]map[string]interface{}, error) {
 	return rows, nil
 }
 
-var version = "1.1.0"
+var version = "1.2.0"
 
 func main() {
 	var apiKeyFlag string
@@ -158,6 +186,7 @@ func main() {
 	var quickMetrics string
 	var quickMinScoreStr string
 	var quickJudge string
+	var quickTunnel bool
 
 	quickCmd := &cobra.Command{
 		Use:   "quick [query]",
@@ -170,6 +199,15 @@ func main() {
 			if query == "" && quickDataset == "" {
 				fmt.Fprintln(os.Stderr, "❌ Provide a query or --dataset")
 				os.Exit(2)
+			}
+
+			// ── Tunnel for local agents ──
+			if quickTunnel {
+				newURL, tun := startTunnelIfNeeded(quickTunnel, quickAgent)
+				quickAgent = newURL
+				if tun != nil {
+					defer tun.Stop()
+				}
 			}
 
 			url := config.ResolveEngineURL(engineURLFlag)
@@ -280,6 +318,7 @@ func main() {
 	quickCmd.Flags().StringVar(&quickMinScoreStr, "min-score", "", "Apply threshold to all metrics and enforce exit code")
 	quickCmd.Flags().StringVar(&quickJudge, "judge", "", "LLM judge model")
 	quickCmd.Flags().StringVar(&engineURLFlag, "engine-url", "", "Engine URL")
+	quickCmd.Flags().BoolVar(&quickTunnel, "tunnel", false, "Expose local agent via cloudflared/ngrok tunnel")
 	rootCmd.AddCommand(quickCmd)
 
 	// eval
@@ -296,6 +335,7 @@ func main() {
 	var evalJudgeModel string
 	var evalName string
 	var evalCustomStr string
+	var evalTunnel bool
 
 	evalCmd := &cobra.Command{
 		Use:   "eval",
@@ -308,6 +348,15 @@ func main() {
 			if evalDataset == "" && evalRows == "" {
 				fmt.Fprintln(os.Stderr, "❌ Provide --dataset or --rows")
 				os.Exit(2)
+			}
+
+			// ── Tunnel for local agents ──
+			if evalTunnel {
+				newURL, tun := startTunnelIfNeeded(evalTunnel, evalAgent)
+				evalAgent = newURL
+				if tun != nil {
+					defer tun.Stop()
+				}
 			}
 
 			key := config.ResolveAPIKey(apiKeyFlag)
@@ -432,6 +481,7 @@ func main() {
 	evalCmd.Flags().StringVar(&evalCustomStr, "custom", "", "Inline custom evaluator JSON")
 	evalCmd.Flags().StringVar(&apiKeyFlag, "api-key", "", "API key (overrides config)")
 	evalCmd.Flags().StringVar(&engineURLFlag, "engine-url", "", "Engine URL")
+	evalCmd.Flags().BoolVar(&evalTunnel, "tunnel", false, "Expose local agent via cloudflared/ngrok tunnel")
 	rootCmd.AddCommand(evalCmd)
 
 	// config

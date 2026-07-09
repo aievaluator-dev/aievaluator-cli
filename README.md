@@ -150,6 +150,38 @@ aievaluator eval --agent $URL --dataset ./queries.jsonl --min-score 0.80
 
 ---
 
+## 🌐 Evaluating local agents
+
+If your agent is running on `localhost` or a private network, the cloud engine can't reach it.
+Use the `--tunnel` flag to automatically create a public tunnel:
+
+```bash
+aievaluator eval --agent http://localhost:8047/chat --tunnel --dataset ./tests.json
+aievaluator quick "Hello" --agent http://localhost:8047/chat --tunnel
+```
+
+The CLI will:
+1. Detect that the URL is local (`localhost`, `127.0.0.1`, `192.168.x.x`, `10.x.x.x`)
+2. Try to start a tunnel in this order: **cloudflared** → **ngrok** → **bore** → **localtunnel**
+3. Replace the local URL with the public one
+4. Run the evaluation normally
+5. Close the tunnel when done
+
+### Requirements
+
+At least one of these must be installed:
+
+| Tool | Install | Signup |
+|------|---------|--------|
+| **cloudflared** (recommended) | `brew install cloudflared` | No signup needed |
+| ngrok | `brew install ngrok` | Free signup + authtoken |
+| bore | `cargo install bore-cli` | No signup |
+| localtunnel | `npm install -g localtunnel` | No signup |
+
+> **💡 cloudflared is free and requires no account.** Just install it and `--tunnel` works.
+
+---
+
 ## 🔧 CI/CD Integration
 
 ### Generate a workflow (all CLIs)

@@ -14,6 +14,17 @@ import os
 import platform
 
 
+def is_local_url(url: str) -> bool:
+    """Check if a URL points to localhost or a private network."""
+    return any(x in url for x in ["localhost", "127.0.0.1", "0.0.0.0", "192.168.", "10."])
+
+
+def extract_port(url: str) -> int | None:
+    """Extract port number from a URL like http://localhost:8047/path."""
+    m = re.search(r":(\d+)", url)
+    return int(m.group(1)) if m else None
+
+
 class TunnelError(Exception):
     """Could not start a tunnel."""
 

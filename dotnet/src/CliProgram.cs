@@ -97,69 +97,88 @@ public static class CliProgram
         var quickMinScore = new Option<string?>("--min-score", "Minimum score threshold");
         var quickJudge = new Option<string?>("--judge", "LLM judge model");
         var quickEngineUrl = new Option<string?>("--engine-url", "Engine URL");
+        var quickTunnel = new Option<bool>("--tunnel", "Expose local agent via cloudflared/ngrok tunnel");
         quickCmd.AddOption(quickDataset); quickCmd.AddOption(quickAgent); quickCmd.AddOption(quickExpected);
         quickCmd.AddOption(quickMetrics); quickCmd.AddOption(quickMinScore); quickCmd.AddOption(quickJudge);
-        quickCmd.AddOption(quickEngineUrl);
-        quickCmd.SetHandler(async (query, dataset, agent, expected, metricsStr, minScoreStr, judge, engineUrl) =>
+        quickCmd.AddOption(quickEngineUrl); quickCmd.AddOption(quickTunnel);
+        quickCmd.SetHandler(async (InvocationContext ctx) =>
         {
-            if (string.IsNullOrEmpty(query) && string.IsNullOrEmpty(dataset)) { Console.Error.WriteLine("❌ Provide a query or --dataset"); Environment.Exit(2); }
-            var url = Config.ResolveEngineUrl(engineUrl);
-            var client = new ApiClient(url, null, 30);
-            var status = await client.PlaygroundStatus();
-            var remaining = status.TryGetValue("remaining", out var rem) ? rem.GetDouble() : 5;
-            if (remaining <= 0) { Console.Error.WriteLine("❌ Playground limit reached. Run `aievaluator login`"); Environment.Exit(2); }
+            var query = ctx.ParseResult.GetValueForArgument(quickQueryArg);
+            var dataset = ctx.ParseResult.GetValueForOption(quickDataset);
+            var agent = ctx.ParseResult.GetValueForOption(quickAgent);
+            var expected = ctx.ParseResult.GetValueForOption(quickExpected);
+            var metricsStr = ctx.ParseResult.GetValueForOption(quickMetrics);
+            var minScoreStr = ctx.ParseResult.GetValueForOption(quickMinScore);
+            var judge = ctx.ParseResult.GetValueForOption(quickJudge);
+            var engineUrl = ctx.ParseResult.GetValueForOption(quickEngineUrl);
+            var tunnel = ctx.ParseResult.GetValueForOption(quickTunnel);
 
-            object[] rows;
-            if (!string.IsNullOrEmpty(query))
-            {
-                var row = new Dictionary<string, object?> { ["input"] = query };
-                if (!string.IsNullOrEmpty(expected)) row["expected_output"] = expected;
-                rows = new object[] { row };
-            }
-            else
-            {
-                try { rows = ParseDatasetFile(dataset!); }
-                catch (Exception ex) { Console.Error.WriteLine($"❌ Cannot read dataset: {ex.Message}"); Environment.Exit(2); return; }
-            }
-
-            var quickMinScoreVal = string.IsNullOrEmpty(minScoreStr) ? 0.0 : double.Parse(minScoreStr);
-            List<object>? metricsList = null;
-            if (!string.IsNullOrEmpty(metricsStr))
-            {
-                metricsList = new List<object>();
-                foreach (var item in metricsStr.Split(',').Select(m => m.Trim()))
-                {
-                    if (item.Contains(':'))
-                    {
-                        var parts = item.Split(':', 2);
-                        if (double.TryParse(parts[1].Trim(), out var tv))
-                            metricsList.Add(new Dictionary<string, object?> { ["name"] = parts[0].Trim(), ["threshold"] = tv });
-                    }
-                    else if (quickMinScoreVal > 0)
-                        metricsList.Add(new Dictionary<string, object?> { ["name"] = item, ["threshold"] = quickMinScoreVal });
-                    else metricsList.Add(item);
-                }
-            }
-            else if (quickMinScoreVal > 0)
-            {
-                metricsList = new List<object> { new Dictionary<string, object?> { ["name"] = "faithfulness", ["threshold"] = quickMinScoreVal }, new Dictionary<string, object?> { ["name"] = "g_eval", ["threshold"] = quickMinScoreVal } };
-            }
-
+            // ── Tunnel for local agents ──
+            Tunnel? tun = null;
             try
             {
-                var result = await client.PlaygroundEvaluate(null, rows, agent ?? "/chat", metricsList?.ToArray(), judge);
-                Formatters.OutputFormatter.FormatTable(result, quickMinScoreVal, url);
-                if (quickMinScoreVal > 0)
+                (agent, tun) = StartTunnelIfNeeded(tunnel, agent ?? "/chat");
+
+                if (string.IsNullOrEmpty(query) && string.IsNullOrEmpty(dataset)) { Console.Error.WriteLine("❌ Provide a query or --dataset"); Environment.Exit(2); }
+                var url = Config.ResolveEngineUrl(engineUrl);
+                var client = new ApiClient(url, null, 30);
+                var status = await client.PlaygroundStatus();
+                var remaining = status.TryGetValue("remaining", out var rem) ? rem.GetDouble() : 5;
+                if (remaining <= 0) { Console.Error.WriteLine("❌ Playground limit reached. Run `aievaluator login`"); Environment.Exit(2); }
+
+                object[] rows;
+                if (!string.IsNullOrEmpty(query))
                 {
-                    var results = result.TryGetProperty("results", out var r) ? r.EnumerateArray() : default;
-                    var allPassed = true;
-                    foreach (var res in results)
-                        if (res.TryGetProperty("passed", out var p) && !p.GetBoolean()) allPassed = false;
-                    if (!allPassed) Environment.Exit(1);
+                    var row = new Dictionary<string, object?> { ["input"] = query };
+                    if (!string.IsNullOrEmpty(expected)) row["expected_output"] = expected;
+                    rows = new object[] { row };
                 }
+                else
+                {
+                    try { rows = ParseDatasetFile(dataset!); }
+                    catch (Exception ex) { Console.Error.WriteLine($"❌ Cannot read dataset: {ex.Message}"); Environment.Exit(2); return; }
+                }
+
+                var quickMinScoreVal = string.IsNullOrEmpty(minScoreStr) ? 0.0 : double.Parse(minScoreStr);
+                List<object>? metricsList = null;
+                if (!string.IsNullOrEmpty(metricsStr))
+                {
+                    metricsList = new List<object>();
+                    foreach (var item in metricsStr.Split(',').Select(m => m.Trim()))
+                    {
+                        if (item.Contains(':'))
+                        {
+                            var parts = item.Split(':', 2);
+                            if (double.TryParse(parts[1].Trim(), out var tv))
+                                metricsList.Add(new Dictionary<string, object?> { ["name"] = parts[0].Trim(), ["threshold"] = tv });
+                        }
+                        else if (quickMinScoreVal > 0)
+                            metricsList.Add(new Dictionary<string, object?> { ["name"] = item, ["threshold"] = quickMinScoreVal });
+                        else metricsList.Add(item);
+                    }
+                }
+                else if (quickMinScoreVal > 0)
+                {
+                    metricsList = new List<object> { new Dictionary<string, object?> { ["name"] = "faithfulness", ["threshold"] = quickMinScoreVal }, new Dictionary<string, object?> { ["name"] = "g_eval", ["threshold"] = quickMinScoreVal } };
+                }
+
+                try
+                {
+                    var result = await client.PlaygroundEvaluate(null, rows, agent ?? "/chat", metricsList?.ToArray(), judge);
+                    Formatters.OutputFormatter.FormatTable(result, quickMinScoreVal, url);
+                    if (quickMinScoreVal > 0)
+                    {
+                        var results = result.TryGetProperty("results", out var r) ? r.EnumerateArray() : default;
+                        var allPassed = true;
+                        foreach (var res in results)
+                            if (res.TryGetProperty("passed", out var p) && !p.GetBoolean()) allPassed = false;
+                        if (!allPassed) Environment.Exit(1);
+                    }
+                }
+                catch (ApiError e) { Console.Error.WriteLine($"❌ {e.Message}"); Environment.Exit(2); }
             }
-            catch (ApiError e) { Console.Error.WriteLine($"❌ {e.Message}"); Environment.Exit(2); }
-        }, quickQueryArg, quickDataset, quickAgent, quickExpected, quickMetrics, quickMinScore, quickJudge, quickEngineUrl);
+            finally { tun?.Dispose(); }
+        });
         rootCommand.AddCommand(quickCmd);
 
         // ═══ eval ═══
@@ -179,15 +198,18 @@ public static class CliProgram
         var evalName = new Option<string?>("--name", "Eval name");
         var evalApiKey = new Option<string?>("--api-key", "API key");
         var evalEngineUrl = new Option<string?>("--engine-url", "Engine URL");
+        var evalTunnel = new Option<bool>("--tunnel", "Expose local agent via cloudflared/ngrok tunnel");
         evalCmd.AddOption(evalAgent); evalCmd.AddOption(evalDataset); evalCmd.AddOption(evalRows);
         evalCmd.AddOption(evalMetrics); evalCmd.AddOption(evalAgentFormat); evalCmd.AddOption(evalMinScore);
         evalCmd.AddOption(evalThresholds); evalCmd.AddOption(evalCustom);
         evalCmd.AddOption(evalFormat); evalCmd.AddOption(evalCi); evalCmd.AddOption(evalTimeout);
         evalCmd.AddOption(evalJudgeModel); evalCmd.AddOption(evalName);
         evalCmd.AddOption(evalApiKey); evalCmd.AddOption(evalEngineUrl);
+        evalCmd.AddOption(evalTunnel);
         evalCmd.SetHandler(async (InvocationContext ctx) =>
         {
             var agent = ctx.ParseResult.GetValueForOption(evalAgent);
+            var tunnel = ctx.ParseResult.GetValueForOption(evalTunnel);
             var dataset = ctx.ParseResult.GetValueForOption(evalDataset);
             var rowsStr = ctx.ParseResult.GetValueForOption(evalRows);
             var metricsStr = ctx.ParseResult.GetValueForOption(evalMetrics);
@@ -201,6 +223,12 @@ public static class CliProgram
             var name = ctx.ParseResult.GetValueForOption(evalName);
             var apiKey = ctx.ParseResult.GetValueForOption(evalApiKey);
             var engineUrl = ctx.ParseResult.GetValueForOption(evalEngineUrl);
+
+            // ── Tunnel for local agents ──
+            Tunnel? tun = null;
+            try
+            {
+                (agent, tun) = StartTunnelIfNeeded(tunnel, agent ?? "");
 
             if (string.IsNullOrEmpty(agent)) { Console.Error.WriteLine("❌ --agent is required"); Environment.Exit(2); }
             if (string.IsNullOrEmpty(dataset) && string.IsNullOrEmpty(rowsStr)) { Console.Error.WriteLine("❌ Provide --dataset or --rows"); Environment.Exit(2); }
@@ -244,6 +272,8 @@ public static class CliProgram
             switch (format) { case "json": Console.WriteLine(Formatters.OutputFormatter.FormatJson(result, minScore)); break; case "junit": Console.WriteLine(Formatters.OutputFormatter.FormatJUnit(result, minScore)); break; default: Formatters.OutputFormatter.FormatTable(result, minScore, url); break; }
             var score = result.TryGetProperty("overall_score", out var os) ? os.GetDouble() : 0;
             if (score < minScore) Environment.Exit(1);
+            }
+            finally { tun?.Dispose(); }
         });
         rootCommand.AddCommand(evalCmd);
 
@@ -452,6 +482,42 @@ jobs:
         rootCommand.AddCommand(generateCiCmd);
 
         return rootCommand;
+    }
+
+    /// <summary>
+    /// If --tunnel is set and agentUrl is local, start a tunnel.
+    /// Returns (possibly_rewritten_url, tunnel_instance).
+    /// </summary>
+    private static (string?, Tunnel?) StartTunnelIfNeeded(bool tunnel, string? agentUrl)
+    {
+        if (!tunnel || string.IsNullOrEmpty(agentUrl)) return (agentUrl, null);
+        if (!Tunnel.IsLocalUrl(agentUrl))
+        {
+            Console.Error.WriteLine("Note: --tunnel is set but agent URL is not localhost. Ignoring.");
+            return (agentUrl, null);
+        }
+        var port = Tunnel.ExtractPort(agentUrl);
+        if (port == null)
+        {
+            Console.Error.WriteLine("❌ Cannot detect port in agent URL. Use format: http://localhost:<PORT>/path");
+            Environment.Exit(2);
+        }
+        var tun = new Tunnel();
+        try
+        {
+            var publicUrl = tun.Start(port.Value);
+            var host = publicUrl.Replace("https://", "").Replace("http://", "");
+            var newUrl = agentUrl.Replace($"localhost:{port}", host);
+            newUrl = newUrl.Replace($"127.0.0.1:{port}", host);
+            Console.Error.WriteLine($"🔗 Tunnel: {publicUrl}");
+            return (newUrl, tun);
+        }
+        catch (TunnelException e)
+        {
+            Console.Error.WriteLine($"❌ {e.Message}");
+            Environment.Exit(2);
+            return (null, null);
+        }
     }
 
     private static object[] ParseDatasetFile(string filePath)

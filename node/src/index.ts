@@ -23,8 +23,9 @@ import {
 import { formatTable } from './formatters/table';
 import { formatJson } from './formatters/json';
 import { formatJunit } from './formatters/junit';
+import { Tunnel, isLocalUrl, extractPort, TunnelError } from './tunnel';
 
-const VERSION = '1.0.0';
+const VERSION = '1.2.0';
 
 const SMOKE_TEST_DATASET = [
   { input: 'What is 2+2?', expected_output: '4' },
@@ -35,6 +36,41 @@ const SMOKE_TEST_DATASET = [
 // ═══════════════════════════════════════════════════════════════════
 //  Helpers
 // ═══════════════════════════════════════════════════════════════════
+
+/**
+ * If --tunnel is set and agentUrl is local, start a tunnel.
+ * Returns possibly-rewritten URL and tunnel instance (or null).
+ */
+async function startTunnelIfNeeded(
+  tunnel: boolean,
+  agentUrl: string,
+): Promise<{ agent: string; tun: Tunnel | null }> {
+  if (!tunnel) return { agent: agentUrl, tun: null };
+  if (!isLocalUrl(agentUrl)) {
+    console.error('Note: --tunnel is set but agent URL is not localhost. Ignoring.');
+    return { agent: agentUrl, tun: null };
+  }
+  const port = extractPort(agentUrl);
+  if (port === null) {
+    console.error('❌ Cannot detect port in agent URL. Use format: http://localhost:<PORT>/path');
+    process.exit(2);
+  }
+  const tun = new Tunnel();
+  try {
+    const publicUrl = await tun.start(port);
+    const host = publicUrl.replace('https://', '').replace('http://', '');
+    let newUrl = agentUrl.replace(`localhost:${port}`, host);
+    newUrl = newUrl.replace(`127.0.0.1:${port}`, host);
+    console.error(`🔗 Tunnel: ${publicUrl}`);
+    return { agent: newUrl, tun };
+  } catch (e) {
+    if (e instanceof TunnelError) {
+      console.error(`❌ ${e.message}`);
+      process.exit(2);
+    }
+    throw e;
+  }
+}
 
 function parseQuickMetrics(
   metricsStr?: string,
@@ -179,59 +215,73 @@ program
   .option('--min-score <score>', 'Apply threshold to all metrics and enforce exit code')
   .option('--judge <model>', 'LLM judge model')
   .option('--engine-url <url>', 'Engine URL')
+  .option('--tunnel', 'Expose local agent via cloudflared/ngrok tunnel')
   .action(async (query, options) => {
-    if (!query && !options.dataset) {
-      console.error('❌ Provide a query or --dataset');
-      process.exit(2);
-    }
-
-    const url = resolveEngineUrl(options.engineUrl);
-    const client = new APIClient(url);
-
-    const metricsList = parseQuickMetrics(
-      options.metrics as string | undefined,
-      options.minScore !== undefined ? parseFloat(options.minScore) : undefined,
-    );
-
-    let status = { used: 0, limit: 5 as number, remaining: 5, resets_at: 'midnight UTC' };
+    // ── Tunnel for local agents ──
+    let tun: Tunnel | null = null;
     try {
-      status = (await client.playgroundStatus()) as typeof status;
-    } catch { /* ok */ }
-
-    console.error(`⚠️  Playground mode — ${status.remaining}/${status.limit} remaining (resets at ${status.resets_at})`);
-    console.error();
-
-    if (status.remaining <= 0) {
-      console.error('❌ Playground limit reached. Run `aievaluator login` for 100 free evals/month.');
-      process.exit(2);
-    }
-
-    let rows: Record<string, unknown>[];
-    if (query) {
-      rows = [{ input: query }];
-      if (options.expected) rows[0].expected_output = options.expected;
-    } else {
-      rows = parseDatasetFile(options.dataset);
-    }
-
-    try {
-      const result = await client.playgroundEvaluate({
-        rows,
-        agentEndpoint: options.agent,
-        metrics: metricsList,
-        judge: options.judge,
-      });
-      const overallPassed = ((result.results as Array<Record<string, unknown>>) || []).every(
-        (r) => r.passed !== false,
+      const tunnelResult = await startTunnelIfNeeded(
+        options.tunnel as boolean,
+        options.agent as string,
       );
-      formatTable(result, options.minScore ? parseFloat(options.minScore) : 0.0, url);
-      if (options.minScore !== undefined && !overallPassed) process.exit(1);
-    } catch (e) {
-      const err = e as APIError;
-      console.error(`❌ ${err.message}`);
-      if (err.detail) console.error(JSON.stringify(err.detail, null, 2));
-      process.exit(2);
-    }
+      options.agent = tunnelResult.agent;
+      tun = tunnelResult.tun;
+
+        if (!query && !options.dataset) {
+          console.error('❌ Provide a query or --dataset');
+          process.exit(2);
+        }
+
+        const url = resolveEngineUrl(options.engineUrl);
+        const client = new APIClient(url);
+
+        const metricsList = parseQuickMetrics(
+          options.metrics as string | undefined,
+          options.minScore !== undefined ? parseFloat(options.minScore) : undefined,
+        );
+
+        let status = { used: 0, limit: 5 as number, remaining: 5, resets_at: 'midnight UTC' };
+        try {
+          status = (await client.playgroundStatus()) as typeof status;
+        } catch { /* ok */ }
+
+        console.error(`⚠️  Playground mode — ${status.remaining}/${status.limit} remaining (resets at ${status.resets_at})`);
+        console.error();
+
+        if (status.remaining <= 0) {
+          console.error('❌ Playground limit reached. Run `aievaluator login` for 100 free evals/month.');
+          process.exit(2);
+        }
+
+        let rows: Record<string, unknown>[];
+        if (query) {
+          rows = [{ input: query }];
+          if (options.expected) rows[0].expected_output = options.expected;
+        } else {
+          rows = parseDatasetFile(options.dataset);
+        }
+
+        try {
+          const result = await client.playgroundEvaluate({
+            rows,
+            agentEndpoint: options.agent,
+            metrics: metricsList,
+            judge: options.judge,
+          });
+          const overallPassed = ((result.results as Array<Record<string, unknown>>) || []).every(
+            (r) => r.passed !== false,
+          );
+          formatTable(result, options.minScore ? parseFloat(options.minScore) : 0.0, url);
+          if (options.minScore !== undefined && !overallPassed) process.exit(1);
+        } catch (e) {
+          const err = e as APIError;
+          console.error(`❌ ${err.message}`);
+          if (err.detail) console.error(JSON.stringify(err.detail, null, 2));
+          process.exit(2);
+        }
+      } finally {
+        if (tun) tun.stop();
+      }
   });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -256,90 +306,104 @@ program
   .option('--name <name>', 'Human-readable name for this evaluation')
   .option('--api-key <key>', 'API key (overrides config)')
   .option('--engine-url <url>', 'Engine URL')
+  .option('--tunnel', 'Expose local agent via cloudflared/ngrok tunnel')
   .action(async (options) => {
-    if (!options.dataset && !options.rows) {
-      console.error('❌ Provide --dataset or --rows');
-      process.exit(2);
-    }
-
-    const key = resolveApiKey(options.apiKey);
-    if (!key) {
-      console.error('❌ API key required. Run: aievaluator login');
-      process.exit(2);
-    }
-
-    const url = resolveEngineUrl(options.engineUrl);
-    const client = new APIClient(url, key, parseInt(options.timeout));
-
-    const metricsList = options.metrics
-      ? options.metrics.split(',').map((m: string) => m.trim())
-      : resolveDefaultMetrics().split(',');
-
-    const minScore = options.minScore !== undefined
-      ? parseFloat(options.minScore)
-      : resolveDefaultMinScore();
-
-    let thresholds: Record<string, number> | undefined;
-    if (options.thresholds) {
-      thresholds = {};
-      for (const pair of (options.thresholds as string).split(',')) {
-        const [metric, val] = pair.split(':').map((s) => s.trim());
-        if (metric && val) {
-          thresholds[metric] = parseFloat(val);
-        }
-      }
-    }
-
-    let result: Record<string, unknown>;
-
+    // ── Tunnel for local agents ──
+    let tun: Tunnel | null = null;
     try {
-      let rows: Record<string, unknown>[];
-      if (options.dataset) {
-        rows = parseDatasetFile(options.dataset);
-      } else {
-        rows = JSON.parse(options.rows);
-        if (!Array.isArray(rows)) rows = [rows];
-      }
-
-      let customEvaluators: Record<string, unknown>[] | undefined;
-      if (options.custom) {
-        const parsed = JSON.parse(options.custom);
-        customEvaluators = Array.isArray(parsed) ? parsed : [parsed];
-      }
-
-      result = await client.evaluateSync(
-        rows,
-        options.agent,
-        options.agentFormat,
-        metricsList,
-        options.judgeModel,
-        options.name,
-        thresholds,
-        customEvaluators,
+      const tunnelResult = await startTunnelIfNeeded(
+        options.tunnel as boolean,
+        options.agent as string,
       );
-    } catch (e) {
-      const err = e as APIError;
-      console.error(`❌ ${err.message}`);
-      if (err.detail) {
-        if (typeof err.detail === 'object') {
-          console.error(JSON.stringify(err.detail, null, 2));
-        } else {
-          console.error(String(err.detail).substring(0, 500));
+      options.agent = tunnelResult.agent;
+      tun = tunnelResult.tun;
+
+        if (!options.dataset && !options.rows) {
+          console.error('❌ Provide --dataset or --rows');
+          process.exit(2);
         }
+
+        const key = resolveApiKey(options.apiKey);
+        if (!key) {
+          console.error('❌ API key required. Run: aievaluator login');
+          process.exit(2);
+        }
+
+        const url = resolveEngineUrl(options.engineUrl);
+        const client = new APIClient(url, key, parseInt(options.timeout));
+
+        const metricsList = options.metrics
+          ? options.metrics.split(',').map((m: string) => m.trim())
+          : resolveDefaultMetrics().split(',');
+
+        const minScore = options.minScore !== undefined
+          ? parseFloat(options.minScore)
+          : resolveDefaultMinScore();
+
+        let thresholds: Record<string, number> | undefined;
+        if (options.thresholds) {
+          thresholds = {};
+          for (const pair of (options.thresholds as string).split(',')) {
+            const [metric, val] = pair.split(':').map((s) => s.trim());
+            if (metric && val) {
+              thresholds[metric] = parseFloat(val);
+            }
+          }
+        }
+
+        let result: Record<string, unknown>;
+
+        try {
+          let rows: Record<string, unknown>[];
+          if (options.dataset) {
+            rows = parseDatasetFile(options.dataset);
+          } else {
+            rows = JSON.parse(options.rows);
+            if (!Array.isArray(rows)) rows = [rows];
+          }
+
+          let customEvaluators: Record<string, unknown>[] | undefined;
+          if (options.custom) {
+            const parsed = JSON.parse(options.custom);
+            customEvaluators = Array.isArray(parsed) ? parsed : [parsed];
+          }
+
+          result = await client.evaluateSync(
+            rows,
+            options.agent,
+            options.agentFormat,
+            metricsList,
+            options.judgeModel,
+            options.name,
+            thresholds,
+            customEvaluators,
+          );
+        } catch (e) {
+          const err = e as APIError;
+          console.error(`❌ ${err.message}`);
+          if (err.detail) {
+            if (typeof err.detail === 'object') {
+              console.error(JSON.stringify(err.detail, null, 2));
+            } else {
+              console.error(String(err.detail).substring(0, 500));
+            }
+          }
+          process.exit(err.statusCode === 0 ? 3 : 2);
+        }
+
+        if (options.format === 'json') {
+          console.log(formatJson(result!, minScore));
+        } else if (options.format === 'junit') {
+          console.log(formatJunit(result!, minScore));
+        } else {
+          formatTable(result!, minScore, url);
+        }
+
+        const overallScore = (result!.overall_score as number) || 0;
+        if (overallScore < minScore) process.exit(1);
+      } finally {
+        if (tun) tun.stop();
       }
-      process.exit(err.statusCode === 0 ? 3 : 2);
-    }
-
-    if (options.format === 'json') {
-      console.log(formatJson(result, minScore));
-    } else if (options.format === 'junit') {
-      console.log(formatJunit(result, minScore));
-    } else {
-      formatTable(result, minScore, url);
-    }
-
-    const overallScore = (result.overall_score as number) || 0;
-    if (overallScore < minScore) process.exit(1);
   });
 
 // ═══════════════════════════════════════════════════════════════════
