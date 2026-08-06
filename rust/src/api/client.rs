@@ -167,4 +167,46 @@ impl ApiClient {
             })),
         }
     }
+
+    pub fn evaluate_direct(
+        &self,
+        rows: &[serde_json::Value],
+        metrics: &[String],
+        judge_model: Option<&str>,
+        thresholds: Option<&std::collections::HashMap<String, f64>>,
+        judge_mode: Option<&str>,
+        judges: Option<&[String]>,
+        ensemble_strategy: Option<&str>,
+        custom_evaluators: Option<&[serde_json::Value]>,
+    ) -> Result<serde_json::Value, ApiError> {
+        let mut body = serde_json::json!({
+            "rows": rows,
+            "metrics": metrics,
+        });
+
+        if let Some(jm) = judge_model {
+            body["judge_model"] = serde_json::Value::String(jm.to_string());
+        }
+        if let Some(t) = thresholds {
+            let map: serde_json::Map<String, serde_json::Value> = t
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::Number(serde_json::Number::from_f64(*v).unwrap())))
+                .collect();
+            body["thresholds"] = serde_json::Value::Object(map);
+        }
+        if let Some(jm) = judge_mode {
+            body["judge_mode"] = serde_json::Value::String(jm.to_string());
+        }
+        if let Some(j) = judges {
+            body["judges"] = serde_json::json!(j);
+        }
+        if let Some(es) = ensemble_strategy {
+            body["ensemble_strategy"] = serde_json::Value::String(es.to_string());
+        }
+        if let Some(ce) = custom_evaluators {
+            body["custom_evaluators"] = serde_json::json!(ce);
+        }
+
+        self.request("POST", "/api/v1/evaluations/direct", Some(&body))
+    }
 }
