@@ -173,4 +173,3 @@ jobs:
       - run: vsce publish
         env:
           VSCE_PAT: ${{ secrets.VSCE_TOKEN }}
-# trigger
