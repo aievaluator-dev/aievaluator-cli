@@ -201,3 +201,38 @@ func (c *Client) PlaygroundStatus() (map[string]interface{}, error) {
 	json.Unmarshal(body, &result)
 	return result, nil
 }
+
+func (c *Client) EvaluateDirect(rows []map[string]interface{}, metrics []string, judgeModel string, thresholds map[string]float64, judgeMode string, judges []string, ensembleStrategy string, customEvaluators []map[string]interface{}) (map[string]interface{}, error) {
+	if metrics == nil {
+		metrics = []string{"faithfulness", "g_eval"}
+	}
+	if judges == nil {
+		judges = []string{}
+	}
+	if customEvaluators == nil {
+		customEvaluators = []map[string]interface{}{}
+	}
+	body := map[string]interface{}{
+		"rows":    rows,
+		"metrics": metrics,
+	}
+	if judgeModel != "" {
+		body["judge_model"] = judgeModel
+	}
+	if len(thresholds) > 0 {
+		body["thresholds"] = thresholds
+	}
+	if judgeMode != "" && judgeMode != "single" {
+		body["judge_mode"] = judgeMode
+	}
+	if len(judges) > 0 {
+		body["judges"] = judges
+	}
+	if ensembleStrategy != "" && ensembleStrategy != "average" {
+		body["ensemble_strategy"] = ensembleStrategy
+	}
+	if len(customEvaluators) > 0 {
+		body["custom_evaluators"] = customEvaluators
+	}
+	return c.request("POST", "/api/v1/evaluations/direct", body)
+}
