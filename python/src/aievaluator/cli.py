@@ -4,6 +4,7 @@ Commands:
     aievaluator login      Authenticate with AI Evaluator
     aievaluator whoami     Show current tenant info
     aievaluator quick      Quick eval via playground (no API key)
+    aievaluator direct     Evaluate pre-computed traces (no agent call)
     aievaluator eval       Full evaluation against an agent
     aievaluator config     Manage CLI configuration
 """
@@ -311,6 +312,119 @@ def quick(query, dataset_file, agent_url, agent_auth_type, agent_auth_header, ag
     finally:
         if tun is not None:
             tun.stop()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  direct
+# ═══════════════════════════════════════════════════════════════════
+
+@main.command()
+@click.argument("input_query", required=False)
+@click.option("--response", "-r", required=False, help="Agent response (pre-computed)", default=None)
+@click.option("--context", "-c", help="Retrieved context (for groundedness)", default=None)
+@click.option("--expected", "-e", help="Expected/golden output", default=None)
+@click.option("--dataset", "dataset_file", help="JSON file with rows [{input, response, context?, expected?}]", type=click.Path(exists=True))
+@click.option("--metrics", help="Metrics: faithfulness,g_eval or faithfulness:0.90,g_eval:0.75", default=None)
+@click.option("--min-score", help="Minimum overall score threshold (0-1)", type=float, default=None)
+@click.option("--judge", help="LLM judge model", default=None)
+@click.option("--format", "output_format", help="Output format", type=click.Choice(["table", "json", "junit"]), default="table")
+@click.option("--ci", is_flag=True, help="CI mode (no colors, no prompts)")
+@click.option("--api-key", help="API key (optional, uses playground quota without it)", default=None)
+@click.option("--engine-url", help="Engine URL", default=None)
+def direct(input_query, response, context, expected, dataset_file, metrics, min_score, output_format, ci, api_key, engine_url, judge):
+    """Evaluate pre-computed traces without calling any agent.
+
+    The caller provides the agent's response directly — AI Evaluator
+    acts as a pure judge, running metrics on (input, context, response).
+
+    \b
+    Examples:
+        aievaluator direct "Can I return sale items?" -r "Yes, with receipt" -c "14-day policy"
+        aievaluator direct --dataset ./traces.json --metrics faithfulness,relevance
+
+    Auth: Without --api-key, uses playground quota (5/day).
+          With --api-key, uses your account quota.
+    """
+    # Validate input
+    if input_query and dataset_file:
+        click.echo("❌ Use query OR --dataset, not both", err=True)
+        sys.exit(2)
+    if not input_query and not dataset_file:
+        click.echo("❌ Provide a query or --dataset", err=True)
+        sys.exit(2)
+    if input_query and not response:
+        click.echo("❌ --response is required when passing a query", err=True)
+        sys.exit(2)
+
+    resolved_url = resolve_engine_url(engine_url)
+    client = APIClient(resolved_url, api_key)
+
+    # Build rows
+    if dataset_file:
+        try:
+            rows = _parse_dataset_file(dataset_file)
+        except (json_mod.JSONDecodeError, FileNotFoundError) as e:
+            click.echo(f"❌ Cannot read dataset: {e}", err=True)
+            sys.exit(2)
+    else:
+        row = {"input": input_query, "response": response}
+        if context:
+            row["context"] = context
+        if expected:
+            row["expected"] = expected
+        rows = [row]
+
+    # Parse metrics with thresholds
+    thresholds_dict = {}
+    metrics_list = ["g_eval", "faithfulness"]
+    if metrics:
+        parsed = _parse_quick_metrics(metrics)
+        if parsed:
+            metrics_list_names = []
+            for m in parsed:
+                if isinstance(m, dict):
+                    metrics_list_names.append(m["name"])
+                    thresholds_dict[m["name"]] = m["threshold"]
+                else:
+                    metrics_list_names.append(m)
+            if metrics_list_names:
+                metrics_list = metrics_list_names
+            if min_score is not None and not thresholds_dict:
+                for m in metrics_list:
+                    thresholds_dict[m] = min_score
+    elif min_score is not None:
+        for m in metrics_list:
+            thresholds_dict[m] = min_score
+
+    async def _direct():
+        try:
+            result = await client.evaluate_direct(
+                rows=rows,
+                metrics=metrics_list,
+                judge_model=judge,
+                thresholds=thresholds_dict if thresholds_dict else None,
+            )
+        except APIError as e:
+            _handle_api_error(e)
+
+        if output_format == "json":
+            click.echo(format_json_output(result, min_score or 0.0))
+        elif output_format == "junit":
+            click.echo(format_junit(result, min_score or 0.0))
+        else:
+            # Show summary with summary field if available
+            summary = result.get("summary", {})
+            if summary:
+                click.echo(f"Rows: {summary.get('rows', '?')} | Metrics/row: {summary.get('metrics_per_row', '?')} | "
+                          f"Passed: {summary.get('passed', '?')} | Failed: {summary.get('failed', '?')}")
+                click.echo()
+            format_table(result, min_score or 0.0, resolved_url)
+
+        if min_score is not None:
+            overall_score = result.get("overall_score", 0)
+            sys.exit(0 if overall_score >= min_score else 1)
+
+    _run_async(_direct())
 
 
 # ═══════════════════════════════════════════════════════════════════
