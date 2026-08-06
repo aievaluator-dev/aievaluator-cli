@@ -125,4 +125,23 @@ public class ApiClient
             return new() { ["remaining"] = JsonSerializer.SerializeToElement(5), ["limit"] = JsonSerializer.SerializeToElement(5) };
         }
     }
+
+    public async Task<JsonElement> EvaluateDirect(object[] rows, string[]? metrics = null,
+        string? judgeModel = null, Dictionary<string, double>? thresholds = null,
+        string? judgeMode = null, string[]? judges = null,
+        string? ensembleStrategy = null, List<object>? customEvaluators = null)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["rows"] = rows,
+            ["metrics"] = metrics ?? new[] { "faithfulness", "g_eval" },
+        };
+        if (!string.IsNullOrEmpty(judgeModel)) body["judge_model"] = judgeModel;
+        if (thresholds != null && thresholds.Count > 0) body["thresholds"] = thresholds;
+        if (!string.IsNullOrEmpty(judgeMode) && judgeMode != "single") body["judge_mode"] = judgeMode;
+        if (judges != null && judges.Length > 0) body["judges"] = judges;
+        if (!string.IsNullOrEmpty(ensembleStrategy) && ensembleStrategy != "average") body["ensemble_strategy"] = ensembleStrategy;
+        if (customEvaluators != null && customEvaluators.Count > 0) body["custom_evaluators"] = customEvaluators;
+        return await Request("POST", "/api/v1/evaluations/direct", body);
+    }
 }
