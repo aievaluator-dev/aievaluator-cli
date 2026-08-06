@@ -132,4 +132,27 @@ export class APIClient {
       return { used: 0, limit: 5, remaining: 5, resets_at: 'midnight UTC' };
     }
   }
+
+  async evaluateDirect(
+    rows: Record<string, unknown>[],
+    metrics?: string[],
+    judgeModel?: string,
+    thresholds?: Record<string, number>,
+    judgeMode?: string,
+    judges?: string[],
+    ensembleStrategy?: string,
+    customEvaluators?: Record<string, unknown>[],
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = {
+      rows,
+      metrics: metrics || ['faithfulness', 'g_eval'],
+    };
+    if (judgeModel) body.judge_model = judgeModel;
+    if (thresholds) body.thresholds = thresholds;
+    if (judgeMode && judgeMode !== 'single') body.judge_mode = judgeMode;
+    if (judges && judges.length > 0) body.judges = judges;
+    if (ensembleStrategy && ensembleStrategy !== 'average') body.ensemble_strategy = ensembleStrategy;
+    if (customEvaluators && customEvaluators.length > 0) body.custom_evaluators = customEvaluators;
+    return (await this.request('POST', '/api/v1/evaluations/direct', body)) as Record<string, unknown>;
+  }
 }
