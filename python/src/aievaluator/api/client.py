@@ -194,3 +194,33 @@ class APIClient:
         if resp.status_code >= 400:
             return {"used": 0, "limit": 5, "remaining": 5, "resets_at": "midnight UTC"}
         return resp.json()
+
+    async def evaluate_direct(
+        self,
+        rows: list[dict],
+        metrics: Optional[list[str]] = None,
+        judge_model: Optional[str] = None,
+        thresholds: Optional[dict[str, float]] = None,
+        judge_mode: str = "single",
+        judges: Optional[list[str]] = None,
+        ensemble_strategy: str = "average",
+        custom_evaluators: Optional[list[dict]] = None,
+    ) -> dict:
+        """POST /api/v1/evaluations/direct — evaluate pre-computed traces (no agent call)."""
+        body: dict = {
+            "rows": rows,
+            "metrics": metrics or ["faithfulness", "g_eval"],
+        }
+        if judge_model:
+            body["judge_model"] = judge_model
+        if thresholds:
+            body["thresholds"] = thresholds
+        if judge_mode != "single":
+            body["judge_mode"] = judge_mode
+        if judges:
+            body["judges"] = judges
+        if ensemble_strategy != "average":
+            body["ensemble_strategy"] = ensemble_strategy
+        if custom_evaluators:
+            body["custom_evaluators"] = custom_evaluators
+        return await self._request("POST", "/api/v1/evaluations/direct", json_data=body)
