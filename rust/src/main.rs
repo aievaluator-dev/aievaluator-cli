@@ -101,6 +101,33 @@ enum Commands {
         #[arg(long = "tunnel")]
         tunnel: bool,
     },
+    /// Evaluate a pre-computed trace without calling any agent
+    Direct {
+        /// Query to evaluate
+        query: Option<String>,
+        #[arg(short = 'r', long = "response")]
+        response: Option<String>,
+        #[arg(short = 'c', long = "context")]
+        context: Option<String>,
+        #[arg(short = 'e', long = "expected")]
+        expected: Option<String>,
+        #[arg(short = 'd', long = "dataset")]
+        dataset: Option<String>,
+        #[arg(short = 'm', long = "metrics")]
+        metrics: Option<String>,
+        #[arg(short = 's', long = "min-score")]
+        min_score: Option<f64>,
+        #[arg(long = "judge")]
+        judge: Option<String>,
+        #[arg(short = 'f', long = "format", default_value = "table")]
+        format: String,
+        #[arg(long = "ci")]
+        ci: bool,
+        #[arg(long = "api-key")]
+        api_key: Option<String>,
+        #[arg(long = "engine-url")]
+        engine_url: Option<String>,
+    },
     /// Manage CLI configuration
     Config {
         #[command(subcommand)]
@@ -177,6 +204,20 @@ fn run(cli: Cli) -> Result<(), i32> {
             agent, dataset, rows, metrics, agent_format, min_score, thresholds, custom, format,
             timeout, judge_model, name, api_key, engine_url, tunnel,
         ),
+        Commands::Direct {
+            query,
+            response,
+            context,
+            expected,
+            dataset,
+            metrics,
+            min_score,
+            judge,
+            format,
+            ci: _,
+            api_key,
+            engine_url,
+        } => cmd_direct(query, response, context, expected, dataset, metrics, min_score, judge, format, api_key, engine_url),
         Commands::Config { action } => cmd_config(action),
         Commands::Init => cmd_init(),
         Commands::GenerateCi { platform, dataset, output } => cmd_generate_ci(platform, dataset, output),
@@ -455,6 +496,131 @@ fn cmd_eval(
             let overall_score = result["overall_score"].as_f64().unwrap_or(0.0);
             if overall_score < min_score_val {
                 return Err(1);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ {}", e);
+            if let Some(detail) = e.detail {
+                eprintln!("{}", serde_json::to_string_pretty(&detail).unwrap_or_default());
+            }
+            Err(if e.status_code == 0 { 3 } else { 2 })
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  direct
+// ═══════════════════════════════════════════════════════════════════
+
+fn cmd_direct(
+    query: Option<String>,
+    response: Option<String>,
+    context: Option<String>,
+    expected: Option<String>,
+    dataset: Option<String>,
+    metrics_str: Option<String>,
+    min_score: Option<f64>,
+    judge: Option<String>,
+    format: String,
+    api_key: Option<String>,
+    engine_url: Option<String>,
+) -> Result<(), i32> {
+    // Validate input
+    if query.is_some() && dataset.is_some() {
+        eprintln!("❌ Use query OR --dataset, not both");
+        return Err(2);
+    }
+    if query.is_none() && dataset.is_none() {
+        eprintln!("❌ Provide a query or --dataset");
+        return Err(2);
+    }
+    if query.is_some() && response.is_none() {
+        eprintln!("❌ --response is required when passing a query");
+        return Err(2);
+    }
+
+    let url = config::resolve_engine_url(engine_url.as_deref());
+    let client = ApiClient::new(&url, api_key.as_deref(), 30);
+
+    // Build rows
+    let rows: Vec<serde_json::Value> = if let Some(d) = dataset {
+        parse_dataset_file(&d)?
+    } else {
+        let mut row = serde_json::json!({
+            "input": query.unwrap(),
+            "response": response.unwrap(),
+        });
+        if let Some(ctx) = context {
+            row["context"] = serde_json::Value::String(ctx);
+        }
+        if let Some(exp) = expected {
+            row["expected"] = serde_json::Value::String(exp);
+        }
+        vec![row]
+    };
+
+    // Parse metrics with thresholds
+    let mut thresholds: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    let mut metrics_list: Vec<String> = vec!["g_eval".to_string(), "faithfulness".to_string()];
+    let min_score_val = min_score.unwrap_or(0.0);
+
+    if let Some(ms) = metrics_str {
+        let mut names: Vec<String> = Vec::new();
+        for item in ms.split(',').map(|s| s.trim()) {
+            if let Some((name, val)) = item.split_once(':') {
+                let name = name.trim().to_string();
+                if let Ok(v) = val.trim().parse::<f64>() {
+                    names.push(name.clone());
+                    thresholds.insert(name, v);
+                }
+            } else {
+                names.push(item.to_string());
+            }
+        }
+        if !names.is_empty() {
+            metrics_list = names;
+        }
+    }
+
+    if thresholds.is_empty() && min_score_val > 0.0 {
+        for m in &metrics_list {
+            thresholds.insert(m.clone(), min_score_val);
+        }
+    }
+
+    let thresholds_opt = if thresholds.is_empty() { None } else { Some(&thresholds) };
+
+    match client.evaluate_direct(
+        &rows,
+        &metrics_list,
+        judge.as_deref(),
+        thresholds_opt,
+        None,
+        None,
+        None,
+        None,
+    ) {
+        Ok(result) => {
+            if let Some(summary) = result.get("summary") {
+                let r = summary.get("rows").map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
+                let mpr = summary.get("metrics_per_row").map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
+                let p = summary.get("passed").map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
+                let f = summary.get("failed").map(|v| v.to_string()).unwrap_or_else(|| "?".to_string());
+                eprintln!("Rows: {} | Metrics/row: {} | Passed: {} | Failed: {}", r, mpr, p, f);
+            }
+
+            match format.as_str() {
+                "json" => println!("{}", json::format_json(&result, min_score_val)),
+                "junit" => println!("{}", junit::format_junit(&result, min_score_val)),
+                _ => table::format_table(&result, min_score_val, &url),
+            }
+
+            if min_score_val > 0.0 {
+                let overall_score = result["overall_score"].as_f64().unwrap_or(0.0);
+                if overall_score < min_score_val {
+                    return Err(1);
+                }
             }
             Ok(())
         }
