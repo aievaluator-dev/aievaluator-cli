@@ -407,6 +407,113 @@ program
   });
 
 // ═══════════════════════════════════════════════════════════════════
+//  direct
+// ═══════════════════════════════════════════════════════════════════
+
+program
+  .command('direct')
+  .description('Evaluate pre-computed traces (no agent call)')
+  .argument('[query]', 'Query to evaluate')
+  .option('-r, --response <text>', 'Agent response (pre-computed)')
+  .option('-c, --context <text>', 'Retrieved context (for groundedness)')
+  .option('-e, --expected <text>', 'Expected/golden output')
+  .option('-d, --dataset <path>', 'JSON file with rows [{input, response, context?, expected?}]')
+  .option('-m, --metrics <metrics>', 'Metrics: faithfulness,g_eval or faithfulness:0.90,g_eval:0.75')
+  .option('-s, --min-score <score>', 'Minimum overall score threshold (0-1)')
+  .option('--judge <model>', 'LLM judge model')
+  .option('-f, --format <format>', 'Output format: table, json, junit', 'table')
+  .option('--ci', 'CI mode (no colors, no prompts)')
+  .option('--api-key <key>', 'API key (optional, uses playground quota without it)')
+  .option('--engine-url <url>', 'Engine URL')
+  .action(async (query, options) => {
+    // Validate input
+    if (query && options.dataset) {
+      console.error('❌ Use query OR --dataset, not both');
+      process.exit(2);
+    }
+    if (!query && !options.dataset) {
+      console.error('❌ Provide a query or --dataset');
+      process.exit(2);
+    }
+    if (query && !options.response) {
+      console.error('❌ --response is required when passing a query');
+      process.exit(2);
+    }
+
+    const url = resolveEngineUrl(options.engineUrl);
+    const client = new APIClient(url, options.apiKey);
+
+    // Build rows
+    let rows: Record<string, unknown>[];
+    if (options.dataset) {
+      rows = parseDatasetFile(options.dataset);
+    } else {
+      const row: Record<string, unknown> = { input: query, response: options.response };
+      if (options.context) row.context = options.context;
+      if (options.expected) row.expected = options.expected;
+      rows = [row];
+    }
+
+    // Parse metrics with thresholds
+    const thresholds: Record<string, number> = {};
+    let metricsList: string[] = ['g_eval', 'faithfulness'];
+    if (options.metrics) {
+      const parsed = parseQuickMetrics(options.metrics, options.minScore !== undefined ? parseFloat(options.minScore) : undefined);
+      if (parsed) {
+        const names: string[] = [];
+        for (const m of parsed) {
+          if (typeof m === 'object' && 'name' in m) {
+            names.push(m.name as string);
+            if ((m as Record<string, unknown>).threshold !== undefined) {
+              thresholds[m.name as string] = (m as Record<string, unknown>).threshold as number;
+            }
+          } else {
+            names.push(m as string);
+          }
+        }
+        if (names.length > 0) metricsList = names;
+      }
+    }
+    if (options.minScore !== undefined && Object.keys(thresholds).length === 0) {
+      for (const m of metricsList) {
+        thresholds[m] = parseFloat(options.minScore);
+      }
+    }
+
+    try {
+      const result = await client.evaluateDirect(
+        rows,
+        metricsList,
+        options.judge,
+        Object.keys(thresholds).length > 0 ? thresholds : undefined,
+      );
+
+      if (options.format === 'json') {
+        console.log(formatJson(result, options.minScore ? parseFloat(options.minScore) : 0.0));
+      } else if (options.format === 'junit') {
+        console.log(formatJunit(result, options.minScore ? parseFloat(options.minScore) : 0.0));
+      } else {
+        const summary = result.summary as Record<string, unknown> | undefined;
+        if (summary) {
+          console.error(`Rows: ${summary.rows || '?'} | Metrics/row: ${summary.metrics_per_row || '?'} | ` +
+            `Passed: ${summary.passed || '?'} | Failed: ${summary.failed || '?'}`);
+        }
+        formatTable(result, options.minScore ? parseFloat(options.minScore) : 0.0, url);
+      }
+
+      if (options.minScore !== undefined) {
+        const overallScore = (result.overall_score as number) || 0;
+        if (overallScore < parseFloat(options.minScore)) process.exit(1);
+      }
+    } catch (e) {
+      const err = e as APIError;
+      console.error(`❌ ${err.message}`);
+      if (err.detail) console.error(JSON.stringify(err.detail, null, 2));
+      process.exit(2);
+    }
+  });
+
+// ═══════════════════════════════════════════════════════════════════
 //  config
 // ═══════════════════════════════════════════════════════════════════
 
