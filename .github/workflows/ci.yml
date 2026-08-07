@@ -112,6 +112,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: npm ci
       - run: npm run build
+      - run: npm whoami
       - run: npm publish --access public
 
   publish-dotnet:
