@@ -277,6 +277,138 @@ public static class CliProgram
         });
         rootCommand.AddCommand(evalCmd);
 
+        // ═══ direct ═══
+        var directCmd = new Command("direct", "Evaluate pre-computed traces (no agent call)");
+        var directQueryArg = new Argument<string?>("query", () => null, "Query to evaluate");
+        directCmd.AddArgument(directQueryArg);
+        var directResponse = new Option<string?>("--response", "Agent response (pre-computed)");
+        directResponse.AddAlias("-r");
+        var directContext = new Option<string?>("--context", "Retrieved context (for groundedness)");
+        directContext.AddAlias("-c");
+        var directExpected = new Option<string?>("--expected", "Expected/golden output");
+        directExpected.AddAlias("-e");
+        var directDataset = new Option<string?>("--dataset", "JSON file with rows");
+        directDataset.AddAlias("-d");
+        var directMetrics = new Option<string?>("--metrics", "Metrics: faithfulness,g_eval or faithfulness:0.90,g_eval:0.75");
+        directMetrics.AddAlias("-m");
+        var directMinScore = new Option<string?>("--min-score", "Minimum overall score threshold (0-1)");
+        directMinScore.AddAlias("-s");
+        var directJudge = new Option<string?>("--judge", "LLM judge model");
+        var directFormat = new Option<string?>("--format", () => "table", "Output format: table, json, junit");
+        directFormat.AddAlias("-f");
+        var directCi = new Option<bool>("--ci", "CI mode (no colors, no prompts)");
+        var directApiKey = new Option<string?>("--api-key", "API key (optional, uses playground quota without it)");
+        var directEngineUrl = new Option<string?>("--engine-url", "Engine URL");
+        directCmd.AddOption(directResponse); directCmd.AddOption(directContext); directCmd.AddOption(directExpected);
+        directCmd.AddOption(directDataset); directCmd.AddOption(directMetrics); directCmd.AddOption(directMinScore);
+        directCmd.AddOption(directJudge); directCmd.AddOption(directFormat); directCmd.AddOption(directCi);
+        directCmd.AddOption(directApiKey); directCmd.AddOption(directEngineUrl);
+        directCmd.SetHandler(async (InvocationContext ctx) =>
+        {
+            var query = ctx.ParseResult.GetValueForArgument(directQueryArg);
+            var response = ctx.ParseResult.GetValueForOption(directResponse);
+            var context = ctx.ParseResult.GetValueForOption(directContext);
+            var expected = ctx.ParseResult.GetValueForOption(directExpected);
+            var dataset = ctx.ParseResult.GetValueForOption(directDataset);
+            var metricsStr = ctx.ParseResult.GetValueForOption(directMetrics);
+            var minScoreStr = ctx.ParseResult.GetValueForOption(directMinScore);
+            var judge = ctx.ParseResult.GetValueForOption(directJudge);
+            var format = ctx.ParseResult.GetValueForOption(directFormat);
+            var apiKey = ctx.ParseResult.GetValueForOption(directApiKey);
+            var engineUrl = ctx.ParseResult.GetValueForOption(directEngineUrl);
+
+            // Validate input
+            if (!string.IsNullOrEmpty(query) && !string.IsNullOrEmpty(dataset))
+            { Console.Error.WriteLine("❌ Use query OR --dataset, not both"); Environment.Exit(2); }
+            if (string.IsNullOrEmpty(query) && string.IsNullOrEmpty(dataset))
+            { Console.Error.WriteLine("❌ Provide a query or --dataset"); Environment.Exit(2); }
+            if (!string.IsNullOrEmpty(query) && string.IsNullOrEmpty(response))
+            { Console.Error.WriteLine("❌ --response is required when passing a query"); Environment.Exit(2); }
+
+            var url = Config.ResolveEngineUrl(engineUrl);
+            var client = new ApiClient(url, apiKey, 30);
+
+            // Build rows
+            object[] rows;
+            if (!string.IsNullOrEmpty(dataset))
+            {
+                try { rows = ParseDatasetFile(dataset); }
+                catch (Exception ex) { Console.Error.WriteLine($"❌ Cannot read dataset: {ex.Message}"); Environment.Exit(2); return; }
+            }
+            else
+            {
+                var row = new Dictionary<string, object?> { ["input"] = query, ["response"] = response };
+                if (!string.IsNullOrEmpty(context)) row["context"] = context;
+                if (!string.IsNullOrEmpty(expected)) row["expected"] = expected;
+                rows = new object[] { row };
+            }
+
+            // Parse metrics with thresholds
+            var thresholds = new Dictionary<string, double>();
+            string[] metricsList = { "g_eval", "faithfulness" };
+            double minScore = 0;
+            if (!string.IsNullOrEmpty(minScoreStr))
+            {
+                double.TryParse(minScoreStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out minScore);
+            }
+            if (!string.IsNullOrEmpty(metricsStr))
+            {
+                var names = new List<string>();
+                foreach (var item in metricsStr.Split(',').Select(m => m.Trim()))
+                {
+                    if (item.Contains(':'))
+                    {
+                        var parts = item.Split(':', 2);
+                        var name = parts[0].Trim();
+                        if (double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var tv))
+                        {
+                            names.Add(name);
+                            thresholds[name] = tv;
+                        }
+                    }
+                    else
+                    {
+                        names.Add(item);
+                    }
+                }
+                if (names.Count > 0) metricsList = names.ToArray();
+            }
+            if (thresholds.Count == 0 && minScore > 0)
+            {
+                foreach (var m in metricsList) thresholds[m] = minScore;
+            }
+
+            try
+            {
+                var result = await client.EvaluateDirect(rows, metricsList, judge, thresholds.Count > 0 ? thresholds : null);
+
+                switch (format)
+                {
+                    case "json": Console.WriteLine(Formatters.OutputFormatter.FormatJson(result, minScore)); break;
+                    case "junit": Console.WriteLine(Formatters.OutputFormatter.FormatJUnit(result, minScore)); break;
+                    default:
+                        if (result.TryGetProperty("summary", out var summary))
+                        {
+                            var r = summary.TryGetProperty("rows", out var rv) ? rv.ToString() : "?";
+                            var mpr = summary.TryGetProperty("metrics_per_row", out var mprv) ? mprv.ToString() : "?";
+                            var p = summary.TryGetProperty("passed", out var pv) ? pv.ToString() : "?";
+                            var f = summary.TryGetProperty("failed", out var fv) ? fv.ToString() : "?";
+                            Console.Error.WriteLine($"Rows: {r} | Metrics/row: {mpr} | Passed: {p} | Failed: {f}");
+                        }
+                        Formatters.OutputFormatter.FormatTable(result, minScore, url);
+                        break;
+                }
+
+                if (minScore > 0)
+                {
+                    var score = result.TryGetProperty("overall_score", out var os) ? os.GetDouble() : 0;
+                    if (score < minScore) Environment.Exit(1);
+                }
+            }
+            catch (ApiError e) { Console.Error.WriteLine($"❌ {e.Message}"); Environment.Exit(e.StatusCode == 0 ? 3 : 2); }
+        });
+        rootCommand.AddCommand(directCmd);
+
         // ═══ config ═══
         var configCmd = new Command("config", "Manage CLI configuration");
         var configShowCmd = new Command("show", "Show current configuration");
