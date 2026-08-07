@@ -484,6 +484,161 @@ func main() {
 	evalCmd.Flags().BoolVar(&evalTunnel, "tunnel", false, "Expose local agent via cloudflared/ngrok tunnel")
 	rootCmd.AddCommand(evalCmd)
 
+	// direct
+	var directResponse string
+	var directContext string
+	var directExpected string
+	var directDataset string
+	var directMetrics string
+	var directMinScoreStr string
+	var directJudge string
+	var directFormat string
+	var directCI bool
+
+	directCmd := &cobra.Command{
+		Use:   "direct [query]",
+		Short: "Evaluate pre-computed traces (no agent call)",
+		Long: `Evaluate pre-computed traces without calling any agent.
+
+The caller provides the agent's response directly — AI Evaluator
+acts as a pure judge, running metrics on (input, context, response).
+
+Examples:
+  aievaluator direct "Can I return sale items?" -r "Yes, with receipt" -c "14-day policy"
+  aievaluator direct --dataset ./traces.json --metrics faithfulness,relevance
+
+Auth: Without --api-key, uses playground quota (5/day).
+      With --api-key, uses your account quota.`,
+		Run: func(cmd *cobra.Command, args []string) {
+			query := ""
+			if len(args) > 0 {
+				query = args[0]
+			}
+
+			// Validate input
+			if query != "" && directDataset != "" {
+				fmt.Fprintln(os.Stderr, "❌ Use query OR --dataset, not both")
+				os.Exit(2)
+			}
+			if query == "" && directDataset == "" {
+				fmt.Fprintln(os.Stderr, "❌ Provide a query or --dataset")
+				os.Exit(2)
+			}
+			if query != "" && directResponse == "" {
+				fmt.Fprintln(os.Stderr, "❌ --response is required when passing a query")
+				os.Exit(2)
+			}
+
+			url := config.ResolveEngineURL(engineURLFlag)
+			key := config.ResolveAPIKey(apiKeyFlag)
+			client := api.NewClient(url, key, 30)
+
+			// Build rows
+			var rows []map[string]interface{}
+			if directDataset != "" {
+				var err error
+				rows, err = parseDatasetFile(directDataset)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "❌ Cannot read dataset: %v\n", err)
+					os.Exit(2)
+				}
+			} else {
+				row := map[string]interface{}{"input": query, "response": directResponse}
+				if directContext != "" {
+					row["context"] = directContext
+				}
+				if directExpected != "" {
+					row["expected"] = directExpected
+				}
+				rows = []map[string]interface{}{row}
+			}
+
+			// Parse metrics with thresholds
+			thresholds := make(map[string]float64)
+			metricsList := []string{"g_eval", "faithfulness"}
+			minScore := 0.0
+			if directMinScoreStr != "" {
+				if v, err := config.ParseFloat(directMinScoreStr); err == nil {
+					minScore = v
+				}
+			}
+
+			if directMetrics != "" {
+				var names []string
+				for _, item := range strings.Split(directMetrics, ",") {
+					item = strings.TrimSpace(item)
+					if strings.Contains(item, ":") {
+						parts := strings.SplitN(item, ":", 2)
+						name := strings.TrimSpace(parts[0])
+						if v, err := config.ParseFloat(strings.TrimSpace(parts[1])); err == nil {
+							names = append(names, name)
+							thresholds[name] = v
+						}
+					} else {
+						names = append(names, item)
+					}
+				}
+				if len(names) > 0 {
+					metricsList = names
+				}
+			}
+
+			if len(thresholds) == 0 && minScore > 0 {
+				for _, m := range metricsList {
+					thresholds[m] = minScore
+				}
+			}
+
+			result, err := client.EvaluateDirect(rows, metricsList, directJudge, thresholds, "", nil, "", nil)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+				if apiErr, ok := err.(*api.APIError); ok && apiErr.Detail != nil {
+					b, _ := json.MarshalIndent(apiErr.Detail, "", "  ")
+					fmt.Fprintln(os.Stderr, string(b))
+				}
+				if apiErr, ok := err.(*api.APIError); ok && apiErr.StatusCode == 0 {
+					os.Exit(3)
+				}
+				os.Exit(2)
+			}
+
+			switch directFormat {
+			case "json":
+				fmt.Println(formatters.FormatJSON(result, minScore))
+			case "junit":
+				fmt.Println(formatters.FormatJUnit(result, minScore))
+			default:
+				if summary, ok := result["summary"].(map[string]interface{}); ok {
+					r, _ := summary["rows"]
+					mpr, _ := summary["metrics_per_row"]
+					p, _ := summary["passed"]
+					f, _ := summary["failed"]
+					fmt.Fprintf(os.Stderr, "Rows: %v | Metrics/row: %v | Passed: %v | Failed: %v\n", r, mpr, p, f)
+				}
+				formatters.FormatTable(result, minScore, url)
+			}
+
+			if minScore > 0 {
+				overallScore, _ := result["overall_score"].(float64)
+				if overallScore < minScore {
+					os.Exit(1)
+				}
+			}
+		},
+	}
+	directCmd.Flags().StringVarP(&directResponse, "response", "r", "", "Agent response (pre-computed)")
+	directCmd.Flags().StringVarP(&directContext, "context", "c", "", "Retrieved context (for groundedness)")
+	directCmd.Flags().StringVarP(&directExpected, "expected", "e", "", "Expected/golden output")
+	directCmd.Flags().StringVarP(&directDataset, "dataset", "d", "", "JSON file with rows [{input, response, context?, expected?}]")
+	directCmd.Flags().StringVarP(&directMetrics, "metrics", "m", "", "Metrics: faithfulness,g_eval or faithfulness:0.90,g_eval:0.75")
+	directCmd.Flags().StringVarP(&directMinScoreStr, "min-score", "s", "", "Minimum overall score threshold (0-1)")
+	directCmd.Flags().StringVar(&directJudge, "judge", "", "LLM judge model")
+	directCmd.Flags().StringVarP(&directFormat, "format", "f", "table", "Output format: table, json, junit")
+	directCmd.Flags().BoolVar(&directCI, "ci", false, "CI mode (no colors, no prompts)")
+	directCmd.Flags().StringVar(&apiKeyFlag, "api-key", "", "API key (optional, uses playground quota without it)")
+	directCmd.Flags().StringVar(&engineURLFlag, "engine-url", "", "Engine URL")
+	rootCmd.AddCommand(directCmd)
+
 	// config
 	var configCmd = &cobra.Command{Use: "config", Short: "Manage CLI configuration"}
 
